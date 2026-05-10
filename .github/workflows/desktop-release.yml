@@ -50,6 +50,16 @@ jobs:
             apps/dsa-web/package-lock.json
             apps/dsa-desktop/package-lock.json
 
+      - name: Sync desktop app version from release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          export VERSION="${RELEASE_TAG#v}"
+          cd apps/dsa-desktop
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+          node -e "const pkg = require('./package.json'); if (pkg.version !== process.env.VERSION) throw new Error('package version mismatch: ' + pkg.version); console.log('desktop version:', pkg.version);"
+
       - name: Build desktop package (Windows)
         shell: pwsh
         env:
@@ -84,6 +94,11 @@ jobs:
             }
           if (-not (Test-Path 'dist/release-assets/latest.yml')) {
             throw 'No latest.yml found under dist/release-assets.'
+          }
+          $expectedVersion = $env:RELEASE_TAG.TrimStart('v')
+          $versionPattern = '^version:\s*[''"]?' + [regex]::Escape($expectedVersion) + '[''"]?\s*$'
+          if (-not (Select-String -Path 'dist/release-assets/latest.yml' -Pattern $versionPattern)) {
+            throw "latest.yml version does not match release tag $env:RELEASE_TAG."
           }
           if (-not (Get-ChildItem -Path 'dist/release-assets' -Filter '*.blockmap' -File)) {
             throw 'No blockmap files found under dist/release-assets.'
@@ -137,6 +152,16 @@ jobs:
           cache-dependency-path: |
             apps/dsa-web/package-lock.json
             apps/dsa-desktop/package-lock.json
+
+      - name: Sync desktop app version from release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          export VERSION="${RELEASE_TAG#v}"
+          cd apps/dsa-desktop
+          npm version "${VERSION}" --no-git-tag-version --allow-same-version
+          node -e "const pkg = require('./package.json'); if (pkg.version !== process.env.VERSION) throw new Error('package version mismatch: ' + pkg.version); console.log('desktop version:', pkg.version);"
 
       - name: Cache Electron binaries
         uses: actions/cache@v5
