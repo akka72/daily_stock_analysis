@@ -231,7 +231,7 @@ test('desktop update backup list includes WAL and SHM artifacts', (t) => {
   assert.ok(files.includes(path.join('logs', 'desktop.log')));
 });
 
-test('restorePackagedRuntimeStateFromBackup skips failed copies and clears backup', (t) => {
+test('restorePackagedRuntimeStateFromBackup keeps backup when copy fails', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-desktop-restore-'));
   const appDir = path.join(tempRoot, 'app');
   const userDataDir = path.join(tempRoot, 'userData');
@@ -275,11 +275,13 @@ test('restorePackagedRuntimeStateFromBackup skips failed copies and clears backu
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  assert.doesNotThrow(() => {
-    mainModule.restorePackagedRuntimeStateFromBackup();
-  });
+  const restoreResult = mainModule.restorePackagedRuntimeStateFromBackup();
   assert.equal(failedCopyAttempted, true);
-  assert.equal(fs.existsSync(backupRoot), false);
+  assert.equal(Array.isArray(restoreResult.failed), true);
+  assert.equal(restoreResult.failed.length > 0, true);
+  assert.equal(fs.existsSync(backupRoot), true);
+  assert.equal(fs.existsSync(path.join(backupRoot, 'runtime-state.json')), true);
+  assert.equal(restoreResult.failed[0].includes('target locked'), true);
 });
 
 test('stopBackend waits for backend process exit', async (t) => {

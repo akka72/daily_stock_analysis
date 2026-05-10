@@ -476,21 +476,26 @@ function backupPackagedRuntimeState() {
 }
 
 function restorePackagedRuntimeStateFromBackup() {
+  const result = {
+    backupRoot: null,
+    restored: [],
+    failed: [],
+  };
+
   if (!isWindowsNsisInstalledApp()) {
-    return;
+    return result;
   }
 
   const manifest = readUpdateBackupManifest();
   if (!manifest) {
-    return;
+    return result;
   }
 
   const appDir = resolveAppDir();
   const backupRoot = resolveUpdateBackupRoot();
+  result.backupRoot = backupRoot;
   const runtimeEntries = resolveRuntimeFileEntries(appDir);
   const relativeFiles = normalizeBackupFileList(manifest);
-  const restored = [];
-  const failed = [];
 
   try {
     relativeFiles.forEach((relativePath) => {
@@ -503,22 +508,26 @@ function restorePackagedRuntimeStateFromBackup() {
         }
         ensureDirectory(path.dirname(target));
         fs.copyFileSync(source, target);
-        restored.push(relativePath);
+        result.restored.push(relativePath);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        failed.push(`${relativePath} (${message})`);
+        result.failed.push(`${relativePath} (${message})`);
       }
     });
   } finally {
-    cleanupUpdateBackupRoot();
+    if (!result.failed.length) {
+      cleanupUpdateBackupRoot();
+    }
   }
 
-  if (restored.length) {
-    console.log(`[update] restored runtime files from backup: ${restored.join(', ')}`);
+  if (result.restored.length) {
+    console.log(`[update] restored runtime files from backup: ${result.restored.join(', ')}`);
   }
-  if (failed.length) {
-    logLine(`[update] skipped runtime restore files after copy failure: ${failed.join(', ')}`);
+  if (result.failed.length) {
+    logLine(`[update] skipped runtime restore files after copy failure: ${result.failed.join(', ')}`);
   }
+
+  return result;
 }
 
 function resolveBackendPath() {
@@ -1331,14 +1340,17 @@ ipcMain.handle('desktop:open-release-page', async (_event, releaseUrl) => {
 });
 
 async function createWindow() {
-  if (isWindowsNsisInstalledApp()) {
-    restorePackagedRuntimeStateFromBackup();
-  }
+  const restoreResult = isWindowsNsisInstalledApp() ? restorePackagedRuntimeStateFromBackup() : null;
   initLogging();
+  const restoreFailed = Boolean(restoreResult && restoreResult.failed.length);
+  const restoreErrorMessage = restoreFailed
+    ? `上次更新安装后恢复运行时文件失败，已保留备份目录 ${restoreResult.backupRoot}，请确认后手动恢复并重启应用。失败明细：${restoreResult.failed.join('；')}`
+    : '';
   setDesktopUpdateState({
-    status: UPDATE_STATUS.IDLE,
+    status: restoreFailed ? UPDATE_STATUS.ERROR : UPDATE_STATUS.IDLE,
     currentVersion: resolveDesktopVersion(),
-    message: '',
+    updateMode: restoreFailed ? UPDATE_MODE.MANUAL : UPDATE_MODE.AUTO,
+    message: restoreErrorMessage,
   });
   const startupStartedAt = Date.now();
   const logStartup = (message) => {
@@ -1496,7 +1508,9 @@ async function createWindow() {
     await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
     logStartup(`Main page loadURL resolved in ${Date.now() - mainPageStartedAt}ms`);
     logStartup(`Main UI loaded in ${Date.now() - startupStartedAt}ms`);
-    void performDesktopUpdateCheck({ notify: true });
+    if (!restoreFailed) {
+      void performDesktopUpdateCheck({ notify: true });
+    }
   } catch (error) {
     logStartup(`Startup failed while waiting for health: ${String(error)}`);
     const errorUrl = `file://${loadingPath}?error=${encodeURIComponent(String(error))}`;
