@@ -2,6 +2,7 @@
 """Static checks for notification env mappings in daily_analysis.yml."""
 
 from pathlib import Path
+from scripts.generate_notification_actions_env_table import sync_docs
 
 import yaml
 
@@ -67,3 +68,7 @@ def test_daily_analysis_keeps_deferred_behavior_switches_unmapped() -> None:
 
     for key in P0_EXCLUDED_BEHAVIOR_SWITCHES:
         assert key not in env
+
+
+def test_daily_analysis_notification_actions_env_table_sync() -> None:
+    assert sync_docs(check_only=True) == 0

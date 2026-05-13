@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 收紧 ntfy 结构化校验，避免 URL 编码空白 topic 被误判为有效通知端点。
 - [文档] 补充 Bark custom webhook 示例和 WebPush / Apprise 通知渠道评估，明确本轮不新增运行时依赖或配置入口。
 - [修复] 聚合报告通知按静态渠道隔离发送失败，并补充自定义 Webhook 部分成功诊断与脱敏测试。
+- [文档] P7 收口：`docs/notifications.md` 补齐场景化章节，并接入 `scripts/generate_notification_actions_env_table.py` 的 Actions env 对照表自动生成/校验来源，保留与 workflow 的映射一致性。
 - [修复] 未配置 Tushare / Longbridge 凭据时不再实例化对应可选 fetcher，避免缺失凭据的数据源进入候选集。
 - [修复] Longbridge 遇到连接关闭类异常后会进入冷却期，并在美股/港股实时与日线请求中临时跳过该数据源，避免请求级频繁重连。
 - [修复] Pytdx 股票名称查询在全部服务器不可达时会短暂冷却，并在冷却期内跳过重复探测，减少无效拨号与告警噪音。

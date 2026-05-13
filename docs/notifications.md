@@ -35,43 +35,70 @@
 
 ## GitHub Actions 映射
 
-仓库自带 `.github/workflows/daily_analysis.yml` 只显式导入固定变量名。P0 补齐以下已存在发送链路所需的映射：
+仓库自带 `.github/workflows/daily_analysis.yml` 只显式透传固定变量，下面表直接来源于 `analyze` step 的 `env:`。更新 workflow 后先运行：
 
-- `CUSTOM_WEBHOOK_BODY_TEMPLATE`
-- `WEBHOOK_VERIFY_SSL`
-- `FEISHU_WEBHOOK_SECRET`
-- `FEISHU_WEBHOOK_KEYWORD`
-- `PUSHPLUS_TOPIC`
+```bash
+python scripts/generate_notification_actions_env_table.py
+```
 
-P3 补齐以下通知路由映射：
+<!-- GENERATED: notifications-actions-env-table -->
+| 通知环境变量 | workflow 映射表达式 |
+| --- | --- |
+| `WECHAT_WEBHOOK_URL` | `${{ secrets.WECHAT_WEBHOOK_URL }}` |
+| `WECHAT_MSG_TYPE` | `${{ vars.WECHAT_MSG_TYPE \|\| secrets.WECHAT_MSG_TYPE \|\| 'markdown' }}` |
+| `FEISHU_WEBHOOK_URL` | `${{ secrets.FEISHU_WEBHOOK_URL }}` |
+| `FEISHU_WEBHOOK_SECRET` | `${{ secrets.FEISHU_WEBHOOK_SECRET }}` |
+| `FEISHU_WEBHOOK_KEYWORD` | `${{ vars.FEISHU_WEBHOOK_KEYWORD \|\| secrets.FEISHU_WEBHOOK_KEYWORD }}` |
+| `TELEGRAM_BOT_TOKEN` | `${{ secrets.TELEGRAM_BOT_TOKEN }}` |
+| `TELEGRAM_CHAT_ID` | `${{ secrets.TELEGRAM_CHAT_ID }}` |
+| `TELEGRAM_MESSAGE_THREAD_ID` | `${{ secrets.TELEGRAM_MESSAGE_THREAD_ID }}` |
+| `EMAIL_SENDER` | `${{ vars.EMAIL_SENDER \|\| secrets.EMAIL_SENDER }}` |
+| `EMAIL_PASSWORD` | `${{ secrets.EMAIL_PASSWORD }}` |
+| `EMAIL_RECEIVERS` | `${{ vars.EMAIL_RECEIVERS \|\| secrets.EMAIL_RECEIVERS }}` |
+| `EMAIL_SENDER_NAME` | `${{ vars.EMAIL_SENDER_NAME \|\| secrets.EMAIL_SENDER_NAME \|\| 'daily_stock_analysis股票分析助手' }}` |
+| `PUSHOVER_USER_KEY` | `${{ secrets.PUSHOVER_USER_KEY }}` |
+| `PUSHOVER_API_TOKEN` | `${{ secrets.PUSHOVER_API_TOKEN }}` |
+| `NTFY_URL` | `${{ secrets.NTFY_URL }}` |
+| `NTFY_TOKEN` | `${{ secrets.NTFY_TOKEN }}` |
+| `GOTIFY_URL` | `${{ secrets.GOTIFY_URL }}` |
+| `GOTIFY_TOKEN` | `${{ secrets.GOTIFY_TOKEN }}` |
+| `PUSHPLUS_TOKEN` | `${{ secrets.PUSHPLUS_TOKEN }}` |
+| `PUSHPLUS_TOPIC` | `${{ vars.PUSHPLUS_TOPIC \|\| secrets.PUSHPLUS_TOPIC }}` |
+| `CUSTOM_WEBHOOK_URLS` | `${{ secrets.CUSTOM_WEBHOOK_URLS }}` |
+| `CUSTOM_WEBHOOK_BEARER_TOKEN` | `${{ secrets.CUSTOM_WEBHOOK_BEARER_TOKEN }}` |
+| `CUSTOM_WEBHOOK_BODY_TEMPLATE` | `${{ vars.CUSTOM_WEBHOOK_BODY_TEMPLATE \|\| secrets.CUSTOM_WEBHOOK_BODY_TEMPLATE }}` |
+| `DISCORD_WEBHOOK_URL` | `${{ secrets.DISCORD_WEBHOOK_URL }}` |
+| `DISCORD_BOT_TOKEN` | `${{ secrets.DISCORD_BOT_TOKEN }}` |
+| `DISCORD_MAIN_CHANNEL_ID` | `${{ secrets.DISCORD_MAIN_CHANNEL_ID }}` |
+| `FEISHU_APP_ID` | `${{ secrets.FEISHU_APP_ID }}` |
+| `FEISHU_APP_SECRET` | `${{ secrets.FEISHU_APP_SECRET }}` |
+| `FEISHU_FOLDER_TOKEN` | `${{ secrets.FEISHU_FOLDER_TOKEN }}` |
+| `ASTRBOT_URL` | `${{ secrets.ASTRBOT_URL }}` |
+| `ASTRBOT_TOKEN` | `${{ secrets.ASTRBOT_TOKEN }}` |
+| `SERVERCHAN3_SENDKEY` | `${{ secrets.SERVERCHAN3_SENDKEY }}` |
+| `SLACK_WEBHOOK_URL` | `${{ secrets.SLACK_WEBHOOK_URL }}` |
+| `SLACK_BOT_TOKEN` | `${{ secrets.SLACK_BOT_TOKEN }}` |
+| `SLACK_CHANNEL_ID` | `${{ secrets.SLACK_CHANNEL_ID }}` |
+| `NOTIFICATION_REPORT_CHANNELS` | `${{ vars.NOTIFICATION_REPORT_CHANNELS \|\| secrets.NOTIFICATION_REPORT_CHANNELS }}` |
+| `NOTIFICATION_ALERT_CHANNELS` | `${{ vars.NOTIFICATION_ALERT_CHANNELS \|\| secrets.NOTIFICATION_ALERT_CHANNELS }}` |
+| `NOTIFICATION_SYSTEM_ERROR_CHANNELS` | `${{ vars.NOTIFICATION_SYSTEM_ERROR_CHANNELS \|\| secrets.NOTIFICATION_SYSTEM_ERROR_CHANNELS }}` |
+| `NOTIFICATION_DEDUP_TTL_SECONDS` | `${{ vars.NOTIFICATION_DEDUP_TTL_SECONDS \|\| secrets.NOTIFICATION_DEDUP_TTL_SECONDS \|\| '0' }}` |
+| `NOTIFICATION_COOLDOWN_SECONDS` | `${{ vars.NOTIFICATION_COOLDOWN_SECONDS \|\| secrets.NOTIFICATION_COOLDOWN_SECONDS \|\| '0' }}` |
+| `NOTIFICATION_QUIET_HOURS` | `${{ vars.NOTIFICATION_QUIET_HOURS \|\| secrets.NOTIFICATION_QUIET_HOURS }}` |
+| `NOTIFICATION_TIMEZONE` | `${{ vars.NOTIFICATION_TIMEZONE \|\| secrets.NOTIFICATION_TIMEZONE }}` |
+| `NOTIFICATION_MIN_SEVERITY` | `${{ vars.NOTIFICATION_MIN_SEVERITY \|\| secrets.NOTIFICATION_MIN_SEVERITY }}` |
+| `NOTIFICATION_DAILY_DIGEST_ENABLED` | `${{ vars.NOTIFICATION_DAILY_DIGEST_ENABLED \|\| secrets.NOTIFICATION_DAILY_DIGEST_ENABLED \|\| 'false' }}` |
+<!-- END GENERATED: notifications-actions-env-table -->
 
-- `NOTIFICATION_REPORT_CHANNELS`
-- `NOTIFICATION_ALERT_CHANNELS`
-- `NOTIFICATION_SYSTEM_ERROR_CHANNELS`
+脚本也可用于 CI 校验：
 
-P4 补齐以下通知降噪映射：
-
-- `NOTIFICATION_DEDUP_TTL_SECONDS`
-- `NOTIFICATION_COOLDOWN_SECONDS`
-- `NOTIFICATION_QUIET_HOURS`
-- `NOTIFICATION_TIMEZONE`
-- `NOTIFICATION_MIN_SEVERITY`
-- `NOTIFICATION_DAILY_DIGEST_ENABLED`
-
-P6-A / P6-C 补齐以下 ntfy / Gotify 渠道映射：
-
-- `NTFY_URL`
-- `NTFY_TOKEN`
-- `GOTIFY_URL`
-- `GOTIFY_TOKEN`
-
-默认 workflow 仍不映射 `MARKDOWN_TO_IMAGE_CHANNELS` 与 `MERGE_EMAIL_NOTIFICATION`。它们是发送形态或聚合行为开关，不是渠道凭证；在 Actions 中自动开始读取同名 Secret/Variable 会引入额外行为变化。
+```bash
+python scripts/generate_notification_actions_env_table.py --check
+```
 
 ## CLI 诊断
 
-```bash
-python main.py --check-notify
-```
+`python main.py --check-notify`
 
 该命令只读配置，不发送通知，不写入 `.env`。它会在配置加载和日志初始化后立即执行，完成后直接退出，不再进入 Web、调度、大盘复盘或默认分析流程。
 
@@ -230,9 +257,30 @@ Apprise 后续如要引入，应先作为可选依赖评估，而不是默认依
 - 发送失败应隔离在 Apprise 渠道内，不能影响已有渠道的失败隔离语义。
 - 如果采用 Apprise，建议先新增单独 experimental channel 或 CLI-only spike，再决定是否纳入 Web 设置页和 Actions env。
 
-## 场景占位
+`MARKDOWN_TO_IMAGE_CHANNELS` 与 `MERGE_EMAIL_NOTIFICATION` 仍属于运行时行为开关，不在默认 `daily_analysis.yml` env 中显式映射。
 
-- Local：优先使用 `.env`，可用 `python main.py --check-notify` 做本地诊断。
-- Docker：配置来源与本地一致，需确保容器环境变量已注入。
-- GitHub Actions：只会读取 workflow `env:` 中显式映射的 Secret/Variable。
-- Desktop：桌面端内嵌 Web 设置页可复用同一通知测试入口；测试仍只使用临时配置，不写入 `.env`。
+## 场景化接入
+
+### 本地配置
+
+- 以 `.env` 为主，优先级低于运行时环境变量。
+- 以 `python main.py --check-notify` 做首次一次性诊断，不会发送通知，不会写 `.env`。
+- 通知设置页可触发单渠道测试；`CUSTOM_WEBHOOK_URLS` 支持多 URL，结果返回每 URL 级别 attempts 聚合。
+
+### Docker
+
+- Docker 场景沿用同一配置加载路径，可直接复用 `.env`。
+- 建议通过 compose / 启动脚本将通知相关 env 全量注入，避免依赖默认值导致高级选项静默生效。
+- 若需 `WEBHOOK_VERIFY_SSL=false`，请仅在可信内网链路中开启。
+
+### GitHub Actions
+
+- 默认 workflow 只会读取 `analyze` step 下 `env:` 的显式变量；新增通知变量后要同时修改 workflow 映射。
+- 路由/降噪键建议放到 Variables；敏感值建议放 Secrets。
+- 非映射行为键（如 `MARKDOWN_TO_IMAGE_CHANNELS`）仍不会默认生效，除非同步扩展 workflow。
+
+### Desktop
+
+- 桌面端直接复用 Web 设置页与通知测试面板，不会新增后端接口。
+- 本地运行和内嵌服务端行为一致，`send_to_context`、路由过滤和降噪都按同一后端配置解释。
+- 若需排障，优先使用 `--check-notify` 的 CLI 输出与同一 `NotificationTestPanel` 的 attempts 聚合结果核对。
