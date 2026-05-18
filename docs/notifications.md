@@ -4,6 +4,8 @@
 
 此文档属于 `#1311` umbrella issue 的分阶段落地内容。该链路 PR 说明必须使用 `Refs #1311` 保持可追踪，不得使用 `Closes`、`Fixes` 或 `Resolves` 搭配 `#1311` 等自动关闭写法，避免单个阶段性 PR 误关闭主 issue。
 
+> 本轮对应审阅反馈要求：若当前 PR 描述已写 `Closes #1311`，请按规则改为 `Refs #1311`，并在 Description 中补充本轮实际执行的 `backend-gate`、`docker-build` 与 `python main.py --check-notify` 结果（或在文档记录尚未补充的本地 `./scripts/ci_gate.sh` 结果）。
+
 ## 渠道基线
 
 | 渠道 | 类型 | Minimal key | Advanced key | 说明 |
