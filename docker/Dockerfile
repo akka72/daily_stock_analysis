@@ -8,6 +8,7 @@ FROM node:20-slim AS web-builder
 WORKDIR /app/apps/dsa-web
 
 COPY apps/dsa-web/package.json apps/dsa-web/package-lock.json ./
+RUN npm config set registry https://registry.npmjs.org
 RUN npm ci
 
 COPY apps/dsa-web/ ./
