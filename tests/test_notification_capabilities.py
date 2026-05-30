@@ -29,11 +29,11 @@ class NotificationCapabilityProfileTestCase(unittest.TestCase):
         self.assertEqual(get_channel_profile("SLACK").markdown, "mrkdwn")
         self.assertEqual(get_channel_profile("missing").channel, "unknown")
 
-    def test_core_channels_keep_full_report_or_existing_dashboard_defaults(self):
+    def test_core_channels_keep_full_report_defaults(self):
         self.assertEqual(CHANNEL_PROFILES["feishu"].default_mode, "full_report")
         self.assertEqual(CHANNEL_PROFILES["telegram"].default_mode, "full_report")
         self.assertEqual(CHANNEL_PROFILES["slack"].default_mode, "full_report")
-        self.assertEqual(CHANNEL_PROFILES["wechat"].default_mode, "wechat_dashboard")
+        self.assertEqual(CHANNEL_PROFILES["wechat"].default_mode, "full_report")
         self.assertEqual(CHANNEL_PROFILES["email"].default_mode, "full_html")
 
     def test_prepared_message_keeps_legacy_text_fallback(self):

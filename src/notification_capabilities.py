@@ -57,11 +57,11 @@ CHANNEL_PROFILES: Dict[str, ChannelProfile] = {
     "wechat": ChannelProfile(
         channel="wechat",
         markdown="wechat_markdown",
-        default_mode="wechat_dashboard",
+        default_mode="full_report",
         max_text_bytes=4096,
         supports_image=True,
         supports_link=True,
-        notes="Enterprise WeChat keeps the existing dashboard-oriented report.",
+        notes="Enterprise WeChat receives the full report by default and relies on safe chunking.",
     ),
     "feishu": ChannelProfile(
         channel="feishu",

@@ -1048,13 +1048,13 @@ class TestTelegramSender(unittest.TestCase):
 
         cfg = _config(telegram_bot_token="BOT", telegram_chat_id="CHAT")
         sender = TelegramSender(cfg)
-        content = "关注 [AAPL] (未闭合)"
+        content = "关注 **AAPL** (未闭合)"
         result = sender.send_to_telegram(content)
 
         self.assertTrue(result)
         first_payload = mock_post.call_args_list[0][1]["json"]
         second_payload = mock_post.call_args_list[1][1]["json"]
-        self.assertEqual(first_payload["text"], r"关注 \[AAPL\] \(未闭合\)")
+        self.assertEqual(first_payload["text"], "关注 *AAPL* (未闭合)")
         self.assertEqual(second_payload["text"], content)
 
     @mock.patch("src.notification_sender.telegram_sender.requests.post")

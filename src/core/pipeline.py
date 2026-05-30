@@ -34,10 +34,8 @@ from src.analyzer import (
     normalize_chip_structure_availability,
     stabilize_decision_with_structure,
 )
-from src.data.stock_mapping import STOCK_NAME_MAP
 from src.notification import NotificationService, NotificationChannel
 from src.report_language import (
-    get_unknown_text,
     infer_decision_type_from_advice,
     localize_confidence_level,
     localize_operation_advice,
@@ -2571,20 +2569,20 @@ class StockAnalysisPipeline:
                             _get_md2img_hint(),
                         )
 
-                # 企业微信：只发精简版（平台限制）
+                # 企业微信：默认发送完整报告，交给 sender 做结构感知分片。
                 wechat_success = False
                 if NotificationChannel.WECHAT in channels:
                     def _send_wechat_report() -> bool:
                         if report_type == ReportType.BRIEF:
-                            dashboard_content = self.notifier.generate_brief_report(results)
+                            wechat_content = self.notifier.generate_brief_report(results)
                         else:
-                            dashboard_content = self.notifier.generate_wechat_dashboard(results)
-                        logger.info(f"企业微信仪表盘长度: {len(dashboard_content)} 字符")
-                        logger.debug(f"企业微信推送内容:\n{dashboard_content}")
+                            wechat_content = report
+                        logger.info(f"企业微信报告长度: {len(wechat_content)} 字符")
+                        logger.debug(f"企业微信推送内容:\n{wechat_content}")
                         wechat_image_bytes = None
                         if NotificationChannel.WECHAT in channels_needing_image:
                             wechat_image_bytes = markdown_to_image(
-                                dashboard_content,
+                                wechat_content,
                                 max_chars=self.notifier._markdown_to_image_max_chars,
                             )
                             if wechat_image_bytes is None:
@@ -2597,7 +2595,7 @@ class StockAnalysisPipeline:
                         )
                         if use_image:
                             return self.notifier._send_wechat_image(wechat_image_bytes)
-                        return self.notifier.send_to_wechat(dashboard_content)
+                        return self.notifier.send_to_wechat(wechat_content)
 
                     wechat_success, wechat_error = _send_channel_safely(
                         NotificationChannel.WECHAT.value,

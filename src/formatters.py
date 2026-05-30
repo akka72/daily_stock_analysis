@@ -455,6 +455,26 @@ def _parse_markdown_table_row(row: str) -> List[str]:
     return [c for c in cells if c]
 
 
+def _strip_inline_markdown(text: str) -> str:
+    text = text.strip()
+    text = re.sub(r'^\*\*(.+)\*\*$', r'\1', text)
+    text = re.sub(r'^\*(.+)\*$', r'\1', text)
+    text = text.replace("**", "")
+    return text.strip()
+
+
+def _format_two_column_table_row(header: List[str], row: List[str]) -> str:
+    key = _strip_inline_markdown(row[0]) if row else ""
+    value = _strip_inline_markdown(row[1]) if len(row) > 1 else ""
+    value_header = _strip_inline_markdown(header[1]) if len(header) > 1 else ""
+
+    if not value:
+        return key
+    if value.upper() == "N/A" and value_header in {"类型", "Type"}:
+        return key
+    return f"{key}：{value}"
+
+
 def _flush_table_as_key_value_rows(buffer: List[str], output: List[str], *, bullet: str) -> None:
     if not buffer:
         return
@@ -473,10 +493,14 @@ def _flush_table_as_key_value_rows(buffer: List[str], output: List[str], *, bull
     header = rows[0]
     data_rows = rows[1:] if len(rows) > 1 else []
     for row in data_rows:
+        if len(header) == 2 and len(row) >= 2:
+            output.append(f"{bullet} {_format_two_column_table_row(header, row)}")
+            continue
+
         pairs = []
         for idx, cell in enumerate(row):
-            key = header[idx] if idx < len(header) else f"列{idx + 1}"
-            pairs.append(f"{key}：{cell}")
+            key = _strip_inline_markdown(header[idx]) if idx < len(header) else f"列{idx + 1}"
+            pairs.append(f"{key}：{_strip_inline_markdown(cell)}")
         output.append(f"{bullet} {' | '.join(pairs)}")
 
 
@@ -749,20 +773,6 @@ def _format_telegram_markdown_unprotected(content: str) -> str:
     result = re.sub(r'^#{1,6}\s+(.+)$', r'*\1*', result, flags=re.MULTILINE)
     result = re.sub(r'\*\*(.+?)\*\*', r'*\1*', result)
     result = re.sub(r'^\s*---+\s*$', '────────', result, flags=re.MULTILINE)
-
-    import uuid as _uuid
-    link_placeholder = f"__LINK_{_uuid.uuid4().hex[:8]}__"
-    links = []
-
-    def _save_link(match):
-        links.append(match.group(0))
-        return f"{link_placeholder}{len(links) - 1}"
-
-    result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _save_link, result)
-    for char in ['[', ']', '(', ')']:
-        result = result.replace(char, f'\\{char}')
-    for i, link in enumerate(links):
-        result = result.replace(f"{link_placeholder}{i}", link)
     return result.strip()
 
 
@@ -778,7 +788,9 @@ def format_telegram_markdown(content: str) -> str:
 def format_wechat_markdown(content: str) -> str:
     """Keep WeChat Markdown style while making pipe tables mobile-readable."""
 
-    return markdown_tables_to_key_value_rows(content, bullet="•")
+    result = markdown_tables_to_key_value_rows(content, bullet="•")
+    result = re.sub(r'^\s*---+\s*$', '────────', result, flags=re.MULTILINE)
+    return result.strip()
 
 
 def _format_slack_mrkdwn_unprotected(content: str) -> str:
