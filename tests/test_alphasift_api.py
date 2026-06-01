@@ -48,6 +48,15 @@ def _make_adapter_module(
     )
 
 
+def _missing_alphasift_module_diagnostics() -> Dict[str, str]:
+    return {
+        "reason": "missing_module",
+        "stage": "import_adapter",
+        "error_type": "ModuleNotFoundError",
+        "module": "alphasift.dsa_adapter",
+    }
+
+
 class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
     def setUp(self) -> None:
         Config.reset_instance()
@@ -159,6 +168,21 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["diagnostics"]["error_type"], "ModuleNotFoundError")
         self.assertIn("Unexpected AlphaSift import_adapter failure", "\n".join(captured.output))
 
+    def test_status_marks_missing_module_for_auto_install_shortcut(self) -> None:
+        config = self._config(enabled=True)
+        missing_module_exc = ModuleNotFoundError("No module named 'alphasift.dsa_adapter'", name="alphasift.dsa_adapter")
+
+        with (
+            patch("api.v1.endpoints.alphasift._import_alphasift", side_effect=missing_module_exc),
+            self.assertLogs("api.v1.endpoints.alphasift", level="WARNING"),
+        ):
+            payload = alphasift_endpoint.alphasift_status(config=config)
+
+        self.assertFalse(payload["available"])
+        self.assertEqual(payload["diagnostics"]["reason"], "missing_module")
+        self.assertEqual(payload["diagnostics"]["stage"], "import_adapter")
+        self.assertEqual(payload["diagnostics"]["error_type"], "ModuleNotFoundError")
+
     def test_status_logs_and_reports_invalid_get_status_result_diagnostics(self) -> None:
         config = self._config(enabled=False)
         fake_module = _make_adapter_module(get_status=lambda: ["not", "a", "dict"])
@@ -215,7 +239,10 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"DSA_DESKTOP_MODE": "true"}, clear=False),
-            patch("api.v1.endpoints.alphasift._is_alphasift_available", return_value=False),
+            patch(
+                "api.v1.endpoints.alphasift._get_alphasift_status_snapshot",
+                return_value=({}, False, _missing_alphasift_module_diagnostics()),
+            ),
             patch("api.v1.endpoints.alphasift._install_alphasift") as install_mock,
             patch("api.v1.endpoints.alphasift._import_alphasift", return_value=fake_module),
         ):
@@ -232,16 +259,18 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         state_lock = threading.Lock()
         state = {"available": False, "install_count": 0, "probe_count": 0}
         errors: list[BaseException] = []
+        missing_diag = _missing_alphasift_module_diagnostics()
 
-        def is_available() -> bool:
+        def probe_status() -> tuple[dict, bool, dict[str, str] | None]:
             with state_lock:
                 state["probe_count"] += 1
                 probe_count = state["probe_count"]
                 available = state["available"]
-            if probe_count <= 2:
+
+            if probe_count <= 2 and not available:
                 first_probe_barrier.wait(timeout=2)
-                return False
-            return bool(available)
+                return ({}, False, missing_diag)
+            return ({}, bool(available), None if available else missing_diag)
 
         def install(_config: Config) -> Dict[str, Any]:
             with state_lock:
@@ -257,7 +286,7 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"DSA_DESKTOP_MODE": "true"}, clear=False),
-            patch("api.v1.endpoints.alphasift._is_alphasift_available", side_effect=is_available),
+            patch("api.v1.endpoints.alphasift._get_alphasift_status_snapshot", side_effect=probe_status),
             patch("api.v1.endpoints.alphasift._install_alphasift", side_effect=install) as install_mock,
         ):
             threads = [threading.Thread(target=worker), threading.Thread(target=worker)]
@@ -286,7 +315,10 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"DSA_DESKTOP_MODE": "true"}, clear=False),
-            patch("api.v1.endpoints.alphasift._is_alphasift_available", return_value=False),
+            patch(
+                "api.v1.endpoints.alphasift._get_alphasift_status_snapshot",
+                return_value=({}, False, _missing_alphasift_module_diagnostics()),
+            ),
             patch("api.v1.endpoints.alphasift._install_alphasift", side_effect=lambda _config: _raise_alphasift_unavailable()) as install_mock,
         ):
             with self.assertRaises(HTTPException) as caught:
@@ -295,6 +327,33 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 424)
         self.assertEqual(caught.exception.detail["error"], "alphasift_unavailable")
         install_mock.assert_called_once_with(config)
+
+    def test_screen_does_not_auto_install_when_adapter_runtime_unavailable(self) -> None:
+        config = self._config(enabled=True)
+
+        with (
+            patch.dict(os.environ, {"DSA_DESKTOP_MODE": "true"}, clear=False),
+            patch(
+                "api.v1.endpoints.alphasift._get_alphasift_status_snapshot",
+                return_value=(
+                    {},
+                    False,
+                    {"reason": "unexpected_exception", "stage": "get_status", "error_type": "RuntimeError"},
+                ),
+            ),
+            patch("api.v1.endpoints.alphasift._install_alphasift") as install_mock,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                self._screen(config)
+
+        self.assertEqual(caught.exception.status_code, 424)
+        self.assertEqual(caught.exception.detail["error"], "alphasift_unavailable")
+        self.assertEqual(caught.exception.detail.get("diagnostics", {}).get("resolution"), "no_auto_install")
+        self.assertEqual(
+            caught.exception.detail.get("diagnostics", {}).get("message"),
+            "请先检查后端日志并修复运行时异常，当前未触发自动安装。",
+        )
+        install_mock.assert_not_called()
 
     def test_install_rejects_spoofed_localhost_without_admin_session(self) -> None:
         config = self._config(enabled=True)
@@ -646,7 +705,10 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         with (
             patch.dict(os.environ, {"DSA_DESKTOP_MODE": "true"}, clear=False),
-            patch("api.v1.endpoints.alphasift._is_alphasift_available", return_value=False),
+            patch(
+                "api.v1.endpoints.alphasift._get_alphasift_status_snapshot",
+                return_value=({}, False, _missing_alphasift_module_diagnostics()),
+            ),
             patch("api.v1.endpoints.alphasift._install_alphasift") as install_mock,
             patch("api.v1.endpoints.alphasift._import_alphasift", return_value=fake_module),
         ):

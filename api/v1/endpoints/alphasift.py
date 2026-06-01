@@ -244,19 +244,62 @@ def _ensure_alphasift_enabled(config: Config) -> None:
 
 
 def _ensure_alphasift_ready(config: Config, *, request: Request) -> None:
-    if _is_alphasift_available():
+    _, available, diagnostics = _get_alphasift_status_snapshot()
+    if available:
         return
+    if not _should_auto_install_alphasift(diagnostics):
+        raise _alphasift_unavailable_exception(
+            "AlphaSift 已开启但当前运行时状态异常。已保留异常诊断，避免自动重装掩盖真实问题。",
+            diagnostics=_include_alphasift_diagnostic_suffix(diagnostics),
+        )
     with _ALPHASIFT_INSTALL_LOCK:
-        if _is_alphasift_available():
+        _, available, diagnostics = _get_alphasift_status_snapshot()
+        if available:
             return
+        if not _should_auto_install_alphasift(diagnostics):
+            raise _alphasift_unavailable_exception(
+                "AlphaSift 已开启但当前运行时状态异常。已保留异常诊断，避免自动重装掩盖真实问题。",
+                diagnostics=_include_alphasift_diagnostic_suffix(diagnostics),
+            )
         _ensure_alphasift_install_access(request)
         _install_alphasift(config)
+
+
+def _should_auto_install_alphasift(diagnostics: Optional[Dict[str, str]]) -> bool:
+    return bool(diagnostics and diagnostics.get("reason") == "missing_module")
+
+
+def _include_alphasift_diagnostic_suffix(
+    diagnostics: Optional[Dict[str, str]],
+) -> Optional[Dict[str, str]]:
+    if diagnostics is None:
+        return None
+    if diagnostics.get("reason") == "missing_module":
+        return diagnostics
+    normalized = dict(diagnostics)
+    normalized.setdefault("resolution", "no_auto_install")
+    normalized.setdefault(
+        "message",
+        "请先检查后端日志并修复运行时异常，当前未触发自动安装。",
+    )
+    return normalized
+
+
+def _get_alphasift_status_snapshot() -> Tuple[Dict[str, Any], bool, Optional[Dict[str, str]]]:
+    try:
+        adapter_status = _call_alphasift_status()
+    except HTTPException as exc:
+        return {}, False, _extract_alphasift_diagnostics(exc)
+    except Exception as exc:
+        diagnostics = _log_unexpected_alphasift_exception("status_probe", exc)
+        return {}, False, diagnostics
+
+    return adapter_status, _is_adapter_available(adapter_status), None
 
 
 def _ensure_alphasift_install_access(request: Request) -> None:
     if os.getenv("DSA_DESKTOP_MODE") == "true":
         return
-
     refresh_auth_state()
     if not is_auth_enabled():
         raise HTTPException(
@@ -285,18 +328,6 @@ def _is_alphasift_available() -> bool:
     return available
 
 
-def _get_alphasift_status_snapshot() -> Tuple[Dict[str, Any], bool, Optional[Dict[str, str]]]:
-    try:
-        adapter_status = _call_alphasift_status()
-    except HTTPException as exc:
-        return {}, False, _extract_alphasift_diagnostics(exc)
-    except Exception as exc:
-        diagnostics = _log_unexpected_alphasift_exception("status_probe", exc)
-        return {}, False, diagnostics
-
-    return adapter_status, _is_adapter_available(adapter_status), None
-
-
 def _is_adapter_available(adapter_status: Any) -> bool:
     if isinstance(adapter_status, dict):
         return bool(adapter_status.get("available", True))
@@ -309,8 +340,15 @@ def _import_alphasift() -> Any:
         return importlib.import_module(ALPHASIFT_DSA_ADAPTER_MODULE)
     except ModuleNotFoundError as exc:
         if _is_expected_alphasift_missing(exc):
+            diagnostics = {
+                "reason": "missing_module",
+                "stage": "import_adapter",
+                "error_type": exc.__class__.__name__,
+                "module": str(getattr(exc, "name", ALPHASIFT_DSA_ADAPTER_MODULE)),
+            }
             raise _alphasift_unavailable_exception(
-                f"AlphaSift 未安装或未挂载到当前 Python 环境，无法导入 {ALPHASIFT_DSA_ADAPTER_MODULE}：{exc}"
+                f"AlphaSift 未安装或未挂载到当前 Python 环境，无法导入 {ALPHASIFT_DSA_ADAPTER_MODULE}：{exc}",
+                diagnostics=diagnostics,
             ) from exc
         diagnostics = _log_unexpected_alphasift_exception("import_adapter", exc)
         raise _alphasift_unavailable_exception(
@@ -356,7 +394,27 @@ def _get_adapter_callable(adapter: Any, name: str, missing_error: str) -> Any:
 
 
 def _call_alphasift_status() -> Dict[str, Any]:
-    adapter = _import_alphasift()
+    try:
+        adapter = _import_alphasift()
+    except ModuleNotFoundError as exc:
+        if _is_expected_alphasift_missing(exc):
+            logger.warning("AlphaSift import missing expected module during status probe: %s", exc)
+            diagnostics = {
+                "reason": "missing_module",
+                "stage": "import_adapter",
+                "error_type": exc.__class__.__name__,
+                "module": str(getattr(exc, "name", ALPHASIFT_DSA_ADAPTER_MODULE)),
+            }
+            raise _alphasift_unavailable_exception(
+                f"AlphaSift 未安装或未挂载到当前 Python 环境，无法导入 {ALPHASIFT_DSA_ADAPTER_MODULE}：{exc}",
+                diagnostics=diagnostics,
+            ) from exc
+
+        diagnostics = _log_unexpected_alphasift_exception("import_adapter", exc)
+        raise _alphasift_unavailable_exception(
+            f"AlphaSift 适配层导入失败，请检查依赖完整性和当前 Python 环境：{exc}",
+            diagnostics=diagnostics,
+        ) from exc
     try:
         get_status = _get_adapter_callable(adapter, "get_status", "get_status() 不可调用。")
     except HTTPException as exc:
