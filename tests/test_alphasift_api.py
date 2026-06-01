@@ -7,7 +7,7 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from fastapi import HTTPException
 
@@ -410,7 +410,9 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
             market="cn",
             max_results=5,
             use_llm=True,
+            context=ANY,
         )
+        self.assertEqual(fake_module.screen.call_args.kwargs["context"]["llm"]["model"], "")
         self.assertEqual(payload["run_id"], "run123")
         self.assertEqual(payload["snapshot_count"], 100)
         self.assertEqual(payload["after_filter_count"], 5)
@@ -424,6 +426,83 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         self.assertEqual(payload["candidates"][0]["risk_level"], "medium")
         self.assertEqual(payload["candidates"][0]["price"], 1688.0)
         self.assertEqual(payload["candidates"][0]["industry"], "Baijiu")
+
+    def test_screen_bridges_dsa_llm_config_into_alphasift_runtime(self) -> None:
+        config = Config(
+            alphasift_enabled=True,
+            alphasift_install_spec=DEFAULT_ALPHASIFT_TEST_SPEC,
+            litellm_model="gemini/gemini-2.5-flash",
+            litellm_fallback_models=["deepseek/deepseek-chat"],
+            llm_channels=[
+                {
+                    "name": "gemini",
+                    "protocol": "gemini",
+                    "enabled": True,
+                    "base_url": "",
+                    "api_keys": ["dsa-gemini-key"],
+                    "models": ["gemini/gemini-2.5-flash"],
+                }
+            ],
+        )
+        captured: dict[str, object] = {}
+
+        def screen_impl(_strategy: str, **kwargs):
+            captured["env"] = {
+                "LITELLM_MODEL": alphasift_endpoint.os.environ.get("LITELLM_MODEL"),
+                "LITELLM_FALLBACK_MODELS": alphasift_endpoint.os.environ.get("LITELLM_FALLBACK_MODELS"),
+                "LLM_CHANNELS": alphasift_endpoint.os.environ.get("LLM_CHANNELS"),
+                "LLM_GEMINI_PROTOCOL": alphasift_endpoint.os.environ.get("LLM_GEMINI_PROTOCOL"),
+                "LLM_GEMINI_API_KEYS": alphasift_endpoint.os.environ.get("LLM_GEMINI_API_KEYS"),
+                "GEMINI_API_KEY": alphasift_endpoint.os.environ.get("GEMINI_API_KEY"),
+            }
+            captured["context"] = kwargs.get("context")
+            return {"candidates": []}
+
+        fake_module = _make_adapter_module(screen=MagicMock(side_effect=screen_impl))
+
+        with (
+            patch.dict(alphasift_endpoint.os.environ, {"GEMINI_API_KEY": "outer-key"}, clear=False),
+            patch("api.v1.endpoints.alphasift._import_alphasift", return_value=fake_module),
+        ):
+            payload = self._screen(config, market="cn", strategy="dual_low", max_results=5)
+            self.assertEqual(alphasift_endpoint.os.environ.get("GEMINI_API_KEY"), "outer-key")
+
+        runtime_env = captured["env"]
+        self.assertIsInstance(runtime_env, dict)
+        self.assertEqual(runtime_env["LITELLM_MODEL"], "gemini/gemini-2.5-flash")
+        self.assertEqual(runtime_env["LITELLM_FALLBACK_MODELS"], "deepseek/deepseek-chat")
+        self.assertEqual(runtime_env["LLM_CHANNELS"], "gemini")
+        self.assertEqual(runtime_env["LLM_GEMINI_PROTOCOL"], "gemini")
+        self.assertEqual(runtime_env["LLM_GEMINI_API_KEYS"], "dsa-gemini-key")
+        self.assertEqual(runtime_env["GEMINI_API_KEY"], "dsa-gemini-key")
+        context = captured["context"]
+        self.assertIsInstance(context, dict)
+        self.assertEqual(context["llm"]["model"], "gemini/gemini-2.5-flash")
+        self.assertEqual(context["llm"]["channels"][0]["api_keys"], ["dsa-gemini-key"])
+        self.assertEqual(payload["candidate_count"], 0)
+
+    def test_screen_retries_without_context_for_older_adapter_kwargs_wrappers(self) -> None:
+        config = self._config(enabled=True)
+
+        def screen_impl(_strategy: str, **kwargs):
+            if "context" in kwargs:
+                raise TypeError("unexpected keyword argument 'context'")
+            return {"candidates": []}
+
+        fake_module = _make_adapter_module(screen=MagicMock(side_effect=screen_impl))
+
+        with patch("api.v1.endpoints.alphasift._import_alphasift", return_value=fake_module):
+            payload = self._screen(config, market="cn", strategy="dual_low", max_results=5)
+
+        self.assertEqual(fake_module.screen.call_count, 2)
+        first_kwargs = fake_module.screen.call_args_list[0].kwargs
+        second_kwargs = fake_module.screen.call_args_list[1].kwargs
+        self.assertIn("context", first_kwargs)
+        self.assertNotIn("context", second_kwargs)
+        self.assertEqual(second_kwargs["market"], "cn")
+        self.assertEqual(second_kwargs["max_results"], 5)
+        self.assertEqual(second_kwargs["use_llm"], True)
+        self.assertEqual(payload["candidate_count"], 0)
 
     def test_screen_installs_when_enabled_but_adapter_missing(self) -> None:
         config = self._config(enabled=True)
@@ -443,6 +522,7 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
             market="cn",
             max_results=5,
             use_llm=True,
+            context=ANY,
         )
         self.assertEqual(payload["candidates"], [])
         self.assertEqual(payload["candidate_count"], 0)
@@ -488,6 +568,7 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
             market="cn",
             max_results=5,
             use_llm=True,
+            context=ANY,
         )
         self.assertEqual(payload["candidates"], [])
         self.assertEqual(payload["candidate_count"], 0)

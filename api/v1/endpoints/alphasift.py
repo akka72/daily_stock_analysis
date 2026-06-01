@@ -10,9 +10,11 @@ import math
 import os
 import subprocess
 import sys
+import threading
+from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -27,6 +29,7 @@ logger = logging.getLogger(__name__)
 ALPHASIFT_DSA_ADAPTER_MODULE = "alphasift.dsa_adapter"
 ALPHASIFT_EXPECTED_MISSING_MODULES = frozenset({"alphasift", ALPHASIFT_DSA_ADAPTER_MODULE})
 ALLOWED_ALPHASIFT_INSTALL_SPECS = frozenset({DEFAULT_ALPHASIFT_INSTALL_SPEC})
+_ALPHASIFT_RUNTIME_ENV_LOCK = threading.RLock()
 
 
 class AlphaSiftScreenRequest(BaseModel):
@@ -183,7 +186,7 @@ def alphasift_screen(
     adapter = _get_dsa_adapter()
     screen = _get_adapter_callable(adapter, "screen", "screen() 不可调用。")
     try:
-        raw = _call_alphasift_screen(screen, request.strategy, request.market, request.max_results)
+        raw = _call_alphasift_screen(screen, request.strategy, request.market, request.max_results, config)
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -487,7 +490,7 @@ def _ensure_supported_strategy(strategy: str) -> None:
     # 策略由适配层进行最终校验，因此在列表外仍保持透传。
 
 
-def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results: int) -> Any:
+def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results: int, config: Config) -> Any:
     signature = inspect.signature(screen)
     params = signature.parameters
     supports_var_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values())
@@ -501,6 +504,7 @@ def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results:
     supports_max_results = "max_results" in params or supports_var_kwargs
     supports_max_output = "max_output" in params or supports_var_kwargs
     supports_use_llm = "use_llm" in params or supports_var_kwargs
+    supports_context = "context" in params or supports_var_kwargs
 
     kwargs: Dict[str, Any] = {"market": market}
     if supports_max_results:
@@ -512,19 +516,188 @@ def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results:
 
     if supports_use_llm:
         kwargs["use_llm"] = True
+    if supports_context:
+        kwargs["context"] = _build_alphasift_context(config)
 
-    try:
-        return screen(strategy, **kwargs)
-    except TypeError as exc:
-        message = str(exc)
-        signature_mismatch = ("keyword" in message and "argument" in message) or (
-            "positional" in message and "given" in message
-        )
-        if not signature_mismatch:
-            raise
-        if not (supports_var_kwargs or supports_var_positional or len(positional_params) >= 3):
-            raise
-        return screen(strategy, market, max_results)
+    with _alphasift_runtime_env(config):
+        try:
+            return screen(strategy, **kwargs)
+        except TypeError as exc:
+            message = str(exc)
+            signature_mismatch = ("keyword" in message and "argument" in message) or (
+                "positional" in message and "given" in message
+            )
+            if not signature_mismatch:
+                raise
+            if "context" in kwargs:
+                retry_kwargs = dict(kwargs)
+                retry_kwargs.pop("context", None)
+                try:
+                    return screen(strategy, **retry_kwargs)
+                except TypeError as retry_exc:
+                    exc = retry_exc
+            if not (supports_var_kwargs or supports_var_positional or len(positional_params) >= 3):
+                raise exc
+            return screen(strategy, market, max_results)
+
+
+@contextmanager
+def _alphasift_runtime_env(config: Config) -> Iterator[None]:
+    updates = _build_alphasift_runtime_env(config)
+    if not updates:
+        yield
+        return
+
+    sentinel = object()
+    with _ALPHASIFT_RUNTIME_ENV_LOCK:
+        previous = {key: os.environ.get(key, sentinel) for key in updates}
+        os.environ.update(updates)
+        try:
+            yield
+        finally:
+            for key, value in previous.items():
+                if value is sentinel:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value  # type: ignore[assignment]
+
+
+def _build_alphasift_runtime_env(config: Config) -> Dict[str, str]:
+    env: Dict[str, str] = {}
+
+    def put(key: str, value: Any) -> None:
+        text = _env_text(value)
+        if text:
+            env[key] = text
+
+    put("LITELLM_MODEL", config.litellm_model)
+    if config.litellm_fallback_models:
+        put("LITELLM_FALLBACK_MODELS", ",".join(config.litellm_fallback_models))
+    put("LITELLM_CONFIG", config.litellm_config_path)
+    if os.getenv("LLM_TEMPERATURE") not in (None, ""):
+        put("LLM_TEMPERATURE", config.llm_temperature)
+
+    channels = _normalize_dsa_llm_channels(config)
+    if channels:
+        put("LLM_CHANNELS", ",".join(channel["name"] for channel in channels))
+        for channel in channels:
+            prefix = channel["name"].upper()
+            put(f"LLM_{prefix}_ENABLED", "true")
+            put(f"LLM_{prefix}_PROTOCOL", channel.get("protocol"))
+            put(f"LLM_{prefix}_BASE_URL", channel.get("base_url"))
+            put(f"LLM_{prefix}_API_KEYS", ",".join(channel.get("api_keys") or []))
+            put(f"LLM_{prefix}_MODELS", ",".join(channel.get("models") or []))
+
+    gemini_keys = _dedupe_strings([
+        *(config.gemini_api_keys or []),
+        *_channel_keys_for_provider(channels, {"gemini", "vertex_ai"}),
+    ])
+    anthropic_keys = _dedupe_strings([
+        *(config.anthropic_api_keys or []),
+        *_channel_keys_for_provider(channels, {"anthropic"}),
+    ])
+    openai_keys = _dedupe_strings([
+        *(config.openai_api_keys or []),
+        *_channel_keys_for_provider(channels, {"openai"}),
+    ])
+    deepseek_keys = _dedupe_strings([
+        *(config.deepseek_api_keys or []),
+        *_channel_keys_for_provider(channels, {"deepseek"}),
+    ])
+
+    _put_provider_keys(env, "GEMINI", gemini_keys)
+    _put_provider_keys(env, "ANTHROPIC", anthropic_keys)
+    _put_provider_keys(env, "OPENAI", openai_keys)
+    _put_provider_keys(env, "DEEPSEEK", deepseek_keys)
+
+    put("OPENAI_BASE_URL", config.openai_base_url or _first_channel_base_url(channels, {"openai"}))
+    return env
+
+
+def _build_alphasift_context(config: Config) -> Dict[str, Any]:
+    channels = _normalize_dsa_llm_channels(config)
+    return {
+        "llm": {
+            "model": config.litellm_model or "",
+            "fallback_models": list(config.litellm_fallback_models or []),
+            "temperature": config.llm_temperature,
+            "channels": channels,
+            "model_list": _to_plain(config.llm_model_list or []),
+            "litellm_config_path": config.litellm_config_path or "",
+        }
+    }
+
+
+def _normalize_dsa_llm_channels(config: Config) -> List[Dict[str, Any]]:
+    channels: List[Dict[str, Any]] = []
+    for index, raw in enumerate(config.llm_channels or []):
+        if not isinstance(raw, dict):
+            continue
+        name = _env_text(raw.get("name")) or f"channel{index + 1}"
+        api_keys = _dedupe_strings(raw.get("api_keys") if isinstance(raw.get("api_keys"), list) else [])
+        models = _dedupe_strings(raw.get("models") if isinstance(raw.get("models"), list) else [])
+        channel = {
+            "name": name,
+            "protocol": _env_text(raw.get("protocol")),
+            "base_url": _env_text(raw.get("base_url")),
+            "api_keys": api_keys,
+            "models": models,
+            "enabled": bool(raw.get("enabled", True)),
+        }
+        if channel["enabled"] and (api_keys or models or channel["base_url"]):
+            channels.append(channel)
+    return channels
+
+
+def _channel_keys_for_provider(channels: List[Dict[str, Any]], providers: set[str]) -> List[str]:
+    keys: List[str] = []
+    for channel in channels:
+        protocol = _env_text(channel.get("protocol")).lower()
+        models = channel.get("models") or []
+        model_providers = {
+            str(model).split("/", 1)[0].lower()
+            for model in models
+            if isinstance(model, str) and "/" in model
+        }
+        if protocol in providers or model_providers.intersection(providers):
+            keys.extend(channel.get("api_keys") or [])
+    return keys
+
+
+def _first_channel_base_url(channels: List[Dict[str, Any]], providers: set[str]) -> str:
+    for channel in channels:
+        protocol = _env_text(channel.get("protocol")).lower()
+        base_url = _env_text(channel.get("base_url"))
+        if base_url and protocol in providers:
+            return base_url
+    return ""
+
+
+def _put_provider_keys(env: Dict[str, str], provider: str, keys: List[str]) -> None:
+    if not keys:
+        return
+    env[f"{provider}_API_KEYS"] = ",".join(keys)
+    env[f"{provider}_API_KEY"] = keys[0]
+
+
+def _dedupe_strings(values: Any) -> List[str]:
+    result: List[str] = []
+    seen: set[str] = set()
+    if not isinstance(values, list):
+        return result
+    for value in values:
+        text = _env_text(value)
+        if not text or text in seen:
+            continue
+        result.append(text)
+        seen.add(text)
+    return result
+
+
+def _env_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
 def _ensure_supported_market(market: str) -> None:

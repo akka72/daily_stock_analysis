@@ -69,6 +69,32 @@ const getFactorEntries = (item: AlphaSiftCandidate) =>
     .sort((a, b) => Number(b[1]) - Number(a[1]))
     .slice(0, 6);
 
+const toMessageList = (values: string[] | undefined) =>
+  Array.isArray(values) ? values.map((value) => String(value).trim()).filter(Boolean) : [];
+
+const getScreenMessages = (meta: AlphaSiftScreenResponse | null) => {
+  if (!meta) {
+    return [];
+  }
+  return Array.from(
+    new Set([
+      ...toMessageList(meta.warnings),
+      ...toMessageList(meta.sourceErrors),
+      ...toMessageList(meta.llmParseErrors),
+    ]),
+  );
+};
+
+const hasLlmInsight = (item: AlphaSiftCandidate) =>
+  Boolean(
+    item.llmThesis ||
+      item.llmSector ||
+      item.llmTheme ||
+      item.llmConfidence != null ||
+      item.llmWatchItems?.length ||
+      item.llmCatalysts?.length,
+  );
+
 const StockScreeningPage: React.FC = () => {
   const [enabled, setEnabled] = useState(false);
   const [market, setMarket] = useState('cn');
@@ -88,6 +114,11 @@ const StockScreeningPage: React.FC = () => {
   const selectedStrategyTitle = selectedStrategy?.name || selectedStrategy?.title || '自定义策略';
   const selectedStrategyTag = selectedStrategy?.category || selectedStrategy?.tag || selectedStrategy?.tags?.[0] || '自定义';
   const displayedStrategy = selectedStrategy ? selectedStrategyTitle : `自定义策略 (${strategy})`;
+  const screenMessages = useMemo(() => getScreenMessages(screenMeta), [screenMeta]);
+  const llmDegraded = screenMeta?.llmRanked === false;
+  const llmDegradationMessage = llmDegraded
+    ? screenMessages.join('；') || 'LLM 重排未完成或未返回判断，当前候选来自 AlphaSift 本地因子评分。'
+    : '';
 
   const clearScreeningResults = () => {
     setCandidates([]);
@@ -370,6 +401,14 @@ const StockScreeningPage: React.FC = () => {
         </div>
       </section>
 
+      {screenMeta && (screenMessages.length > 0 || llmDegradationMessage) ? (
+        <InlineAlert
+          variant={llmDegraded ? 'warning' : 'info'}
+          title={llmDegraded ? 'LLM 已降级' : 'AlphaSift 提示'}
+          message={llmDegradationMessage || screenMessages.join('；')}
+        />
+      ) : null}
+
       <section className="rounded-2xl border border-border bg-card/95 p-4 shadow-soft-card">
         <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -410,6 +449,11 @@ const StockScreeningPage: React.FC = () => {
                 {candidates.map((item) => {
                   const expanded = expandedCode === item.code;
                   const factors = getFactorEntries(item);
+                  const llmInsightAvailable = hasLlmInsight(item);
+                  const llmFallbackText =
+                    llmDegraded && !llmInsightAvailable
+                      ? '本次 LLM 重排失败或未返回判断，当前展示的是本地因子评分结果。'
+                      : '暂无 LLM 判断';
                   return (
                     <Fragment key={`${item.rank}-${item.code}`}>
                       <tr className="border-t border-border align-top transition-colors hover:bg-hover/50">
@@ -420,7 +464,7 @@ const StockScreeningPage: React.FC = () => {
                         <td className="px-4 py-3 text-secondary-text">{formatNumber(item.price)}</td>
                         <td className="px-4 py-3 text-secondary-text">{formatNumber(item.changePct)}%</td>
                         <td className="px-4 py-3 font-bold text-cyan">{formatScore(item.score)}</td>
-                        <td className="px-4 py-3 text-secondary-text">{formatScore(item.llmScore)}</td>
+                        <td className="px-4 py-3 text-secondary-text">{llmDegraded ? '未重排' : formatScore(item.llmScore)}</td>
                         <td className="px-4 py-3">
                           <span className="rounded-lg bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
                             {item.riskLevel || 'unknown'}
@@ -452,11 +496,15 @@ const StockScreeningPage: React.FC = () => {
                                 <div>
                                   <p className="text-xs font-semibold text-secondary-text">LLM 判断</p>
                                   <p className="mt-1 text-sm leading-6 text-foreground">
-                                    {item.llmThesis || item.reason || '暂无 LLM 判断'}
+                                    {item.llmThesis || llmFallbackText}
                                   </p>
-                                  <p className="mt-1 text-xs text-secondary-text">
-                                    板块 {item.llmSector || '-'} · 主题 {item.llmTheme || '-'} · 置信度 {formatPercent(item.llmConfidence)}
-                                  </p>
+                                  {llmInsightAvailable ? (
+                                    <p className="mt-1 text-xs text-secondary-text">
+                                      板块 {item.llmSector || '-'} · 主题 {item.llmTheme || '-'} · 置信度 {formatPercent(item.llmConfidence)}
+                                    </p>
+                                  ) : (
+                                    <p className="mt-1 text-xs text-secondary-text">LLM 元数据未返回</p>
+                                  )}
                                 </div>
                                 <div>
                                   <p className="text-xs font-semibold text-secondary-text">风险标签</p>
@@ -490,13 +538,13 @@ const StockScreeningPage: React.FC = () => {
                                 <div>
                                   <p className="text-xs font-semibold text-secondary-text">LLM 关注项</p>
                                   <p className="mt-1 text-sm text-foreground">
-                                    {item.llmWatchItems?.length ? item.llmWatchItems.join('，') : '无'}
+                                    {item.llmWatchItems?.length ? item.llmWatchItems.join('，') : llmDegraded ? '未返回（LLM 已降级）' : '无'}
                                   </p>
                                 </div>
                                 <div>
                                   <p className="text-xs font-semibold text-secondary-text">催化因素</p>
                                   <p className="mt-1 text-sm text-foreground">
-                                    {item.llmCatalysts?.length ? item.llmCatalysts.join('，') : '无'}
+                                    {item.llmCatalysts?.length ? item.llmCatalysts.join('，') : llmDegraded ? '未返回（LLM 已降级）' : '无'}
                                   </p>
                                 </div>
                               </div>
