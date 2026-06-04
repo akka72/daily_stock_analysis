@@ -152,7 +152,7 @@ class MarketAnalyzer:
     def _get_market_scope_name(self, review_language: str | None = None) -> str:
         review_language = review_language or self._get_review_language()
         if self.region == "us":
-            return "US market"
+            return "US market" if review_language == "en" else "美股市场"
         if self.region == "hk":
             return "Hong Kong market" if review_language == "en" else "港股市场"
         if review_language == "en":
@@ -229,6 +229,24 @@ Focus on HSI trend, southbound flow dynamics, and sector rotation to define next
 - Risk-on: broad index breakout with expanding southbound participation.
 - Neutral: mixed index signals; focus on selective relative strength.
 - Risk-off: failed breakouts and rising volatility; prioritize capital preservation."""
+        if self.region == "us" and self._get_review_language() == "zh":
+            return """## 美股市场三段式复盘策略
+聚焦指数趋势、宏观叙事与板块轮动，给出次日风控与仓位框架。
+
+### 策略原则
+- 先看标普500、纳斯达克、道琼斯是否同向，确认主线是否一致。
+- 结合宏观与流动性指标，识别风险偏好是修复还是转弱。
+- 将复盘输出映射为“进攻/均衡/防守”动作建议，并给出明确触发失效条件。
+
+### 分析维度
+- 趋势结构：明确市场处于上冲、震荡还是防守转向，判断是否存在关键支撑位背离。
+- 资金与情绪：区分宏观政策、货币面与波动率对权益风险的影响。
+- 主题线索：识别持续性最强的主题与板块轮动是否形成可交易主线。
+
+### 行动框架
+- 进攻：主板块联动上行且量能/风险位同步改善。
+- 均衡：指数分化或量能未明显放大，仓位保守执行。
+- 防守：突破失守且波动率抬升时，优先减码并保留反弹可交易性。"""
         if not (self.region == "cn" and self._get_review_language() == "en"):
             return self.strategy.to_prompt_block()
         return """## Strategy Blueprint: A-share Three-Phase Recap Strategy
@@ -265,6 +283,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 - **Trend Regime**: Classify the market as momentum, range, or risk-off based on HSI/HSTECH/HSCEI alignment.
 - **Capital Flows**: Track southbound flow direction and macro narrative for risk appetite signals.
 - **Sector Themes**: Focus on tech/internet platform persistence and financials/property policy sensitivity.
+"""
+        if self.region == "us" and review_language == "zh":
+            return """### 六、策略框架
+- **趋势结构**：判断市场在进攻、震荡与防守中的状态是否一致。
+- **资金与情绪**：结合波动率、宽度和主题轮动评估风险偏好。
+- **主题主线**：识别可延续和可放大的行业主线与防守线索。
 """
         if not (self.region == "cn" and review_language == "en"):
             return self.strategy.to_markdown_block()
@@ -434,12 +458,17 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         # 按 region 使用不同的新闻搜索词
         search_queries = self.profile.news_queries
+        review_language = self._get_review_language()
+        market_names = {
+            "cn": "大盘" if review_language == "zh" else "A-share market",
+            "us": "美股市场" if review_language == "zh" else "US market",
+            "hk": "港股市场" if review_language == "zh" else "HK market",
+        }
         
         try:
             logger.info("[大盘] 开始搜索市场新闻...")
             
             # 根据 region 设置搜索上下文名称，避免美股搜索被解读为 A 股语境
-            market_names = {"cn": "大盘", "us": "US market", "hk": "HK market"}
             market_name = market_names.get(self.region, "大盘")
             for query in search_queries:
                 response = self.search_service.search_stock_news(
@@ -1332,11 +1361,7 @@ Market conditions can change quickly. The data above is for reference only and d
 ### 五、消息催化
 - 暂无可用新闻时，应降低对题材持续性的确定性判断。
 
-### 六、明日交易计划
-- **结论**：均衡观察。
-- **仓位**：控制在中性区间，等待指数与主线共振。
-- **关注方向**：{top_text or "强于指数的主线板块"}。
-- **回避方向**：{bottom_text or "连续走弱且缺少修复信号的方向"}。
+{self._get_strategy_markdown_block(template_language)}
 
 ### 七、风险提示
 - 市场有风险，投资需谨慎。以上数据仅供参考，不构成投资建议。
