@@ -75,6 +75,36 @@ def test_reuses_same_day_market_review_history_without_running_review() -> None:
     run_review.assert_not_called()
 
 
+def test_reuses_previous_trading_day_history_after_weekend() -> None:
+    db = MagicMock()
+    db.get_analysis_history.return_value = [
+        _history_record(created_at=datetime(2026, 6, 5, 15, 30))
+    ]
+    service = DailyMarketContextService(
+        db_manager=db,
+        today_fn=lambda: date(2026, 6, 8),
+    )
+
+    with patch("src.services.daily_market_context.run_market_review") as run_review:
+        context = service.get_context(
+            region="cn",
+            config=SimpleNamespace(report_language="zh"),
+            notifier=MagicMock(),
+            analyzer=MagicMock(),
+            search_service=MagicMock(),
+            target_date=date(2026, 6, 5),
+        )
+
+    assert context is not None
+    assert context.source == "analysis_history"
+    db.get_analysis_history.assert_called_once_with(
+        code="MARKET",
+        days=5,
+        limit=20,
+    )
+    run_review.assert_not_called()
+
+
 def test_force_refresh_runs_market_review_without_notification() -> None:
     db = MagicMock()
     db.get_analysis_history.return_value = [
@@ -126,6 +156,7 @@ def test_force_refresh_runs_market_review_without_notification() -> None:
     assert kwargs["send_notification"] is False
     assert kwargs["return_structured"] is True
     assert kwargs["override_region"] == "cn"
+    assert kwargs["save_report_file"] is False
 
 
 def test_prompt_section_is_low_sensitivity_and_region_scoped() -> None:

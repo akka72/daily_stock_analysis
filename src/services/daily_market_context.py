@@ -144,9 +144,13 @@ class DailyMarketContextService:
         target_date: date,
     ) -> Optional[DailyMarketContext]:
         try:
+            history_days = _history_lookup_days(
+                target_date=target_date,
+                today=self._today_fn(),
+            )
             records = self.db.get_analysis_history(
                 code=MARKET_REVIEW_HISTORY_CODE,
-                days=2,
+                days=history_days,
                 limit=20,
             )
         except Exception as exc:
@@ -204,6 +208,7 @@ class DailyMarketContextService:
                 merge_notification=False,
                 override_region=region,
                 return_structured=True,
+                save_report_file=False,
             )
         except Exception as exc:
             logger.warning("大盘复盘上下文生成失败，个股分析继续: %s", exc, exc_info=True)
@@ -376,6 +381,10 @@ def _coerce_date(value: Any) -> Optional[date]:
         except ValueError:
             return None
     return None
+
+
+def _history_lookup_days(*, target_date: date, today: date) -> int:
+    return max(2, (today - target_date).days + 2)
 
 
 def _region_matches(value: Any, region: str) -> bool:
