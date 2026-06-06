@@ -1372,15 +1372,23 @@ FastAPI 提供 RESTful API 服务，支持配置管理和触发分析。
 - `cd apps/dsa-web && npm ci --ignore-scripts`
 - `cd apps/dsa-web && npm run lint`
 - `cd apps/dsa-web && npm run build`
-- `cd apps/dsa-web && npm run test -- --run`
+- `cd apps/dsa-web && npm run test -- src/App.test.tsx src/contexts/__tests__/UiLanguageContext.test.tsx src/hooks/__tests__/useSystemConfig.test.tsx`
 - `cd apps/dsa-web && npm run test:smoke`
 
-说明：Playwright 冒烟测试命令在当前受限环境下未能完整通过 `config.webServer`，`npm run test:smoke` 出现 120000ms 超时；该告警可归因为执行环境对本地端口监听受限，属于验证环境差异，不作为 UI 回归失败。可在可达环境补充 `python main.py --serve-only` 或 `apps/dsa-web` 前端开发服务启动后，对 `/login`、`/`、`/settings` 进行人工截图，并注明复核时间与浏览器环境。  
+说明：命令中前四项通过（`npm ci --ignore-scripts`、`npm run lint`、`npm run build`、`npm run test -- ...`）。`npm run test:smoke` 当前环境无法完成：`config.webServer` 启动阶段超时（前端服务器监听 `127.0.0.1:4173` 被沙箱权限拒绝 `EPERM`），且当前环境不具备可达 Playwright 浏览器下载链路。请在可达环境中使用以下命令补充验证并附带截图：
+
+- `python main.py --webui-only --host 127.0.0.1 --port 8000`
+- `cd apps/dsa-web && npm run dev -- --host 127.0.0.1 --port 4173`
+- `cd apps/dsa-web && npm run test:smoke`
+
+截图参考名：`smoke-login-page-zh`、`smoke-home-page-zh`、`smoke-home-page-en`、`smoke-settings-page-zh`、`smoke-settings-page-en`、`smoke-mobile-shell-nav`。
 
 兼容性澄清（Issue #777）：
 
 - `dsa.uiLanguage` 仅影响 WebUI 界面语言状态与文案渲染，不会改写 `provider`、`model`、`base_url` 运行时配置迁移与清理语义；
-- 与本改动相关的结构化检测命中属于读取侧验证告警（误报类环境差异），不改动 `provider/model/base_url` 的运行时读写链路；回退路径为 revert 本次变更或回滚到历史运行行为。
+- 本改动相关的结构化检测命中属于读取侧验证告警（非运行时语义漂移），不改动 `provider/model/base_url` 的运行时读写链路；回退路径为 revert 本次变更或回滚到历史运行行为。
+- 回归证据补充：`apps/dsa-web/src/contexts/__tests__/UiLanguageContext.test.tsx`、`apps/dsa-web/src/hooks/__tests__/useSystemConfig.test.tsx`、以及后端 `tests/test_system_config_service.py` 中  
+  `test_runtime_env_fallback_does_not_override_saved_provider_and_base_url_settings`、`test_get_config_runtime_env_fallback_does_not_persist_llm_fields_on_save`、`test_get_config_uses_runtime_env_as_display_fallback`。
 
 ### API 接口
 

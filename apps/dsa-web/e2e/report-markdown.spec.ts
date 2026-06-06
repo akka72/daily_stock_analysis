@@ -2,6 +2,12 @@ import { expect, test, type Page } from '@playwright/test';
 
 const smokePassword = process.env.DSA_WEB_SMOKE_PASSWORD;
 
+if (!smokePassword) {
+  test.skip(true, 'Set DSA_WEB_SMOKE_PASSWORD to run report markdown smoke tests.');
+}
+
+test.use({ locale: 'zh-CN' });
+
 async function login(page: Page) {
   test.skip(!smokePassword, 'Set DSA_WEB_SMOKE_PASSWORD to run report markdown tests.');
 

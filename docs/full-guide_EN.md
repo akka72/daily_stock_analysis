@@ -1203,15 +1203,25 @@ This change already includes bilingual smoke-capture evidence for login/home/set
 - `cd apps/dsa-web && npm ci --ignore-scripts`
 - `cd apps/dsa-web && npm run lint`
 - `cd apps/dsa-web && npm run build`
-- `cd apps/dsa-web && npm run test -- --run`
+- `cd apps/dsa-web && npm run test -- src/App.test.tsx src/contexts/__tests__/UiLanguageContext.test.tsx src/hooks/__tests__/useSystemConfig.test.tsx`
 - `cd apps/dsa-web && npm run test:smoke`
 
-Note: `npm run test:smoke` cannot complete in this execution environment because the Playwright `config.webServer` bootstrap times out (120000ms) and local socket binding is restricted; this is an environment limitation rather than a UI regression signal. Full visual evidence should be collected in an environment where `python main.py --serve-only` or `apps/dsa-web` dev service is reachable, then capture `/login`, `/`, and `/settings` in both locales and record the timestamp/browser context.
+Note: The first four commands pass locally (`npm ci --ignore-scripts`, `npm run lint`, `npm run build`, and the targeted Vitest run). `npm run test:smoke` cannot complete in this execution environment because the Playwright webServer startup times out: the frontend `vite` dev server bind on `127.0.0.1:4173` is blocked by sandbox `EPERM`, and the environment also blocks Playwright browser download/retrieval. Please run the following commands in a reachable environment and attach the resulting screenshots to PR review:
+
+- `python main.py --webui-only --host 127.0.0.1 --port 8000`
+- `cd apps/dsa-web && npm run dev -- --host 127.0.0.1 --port 4173`
+- `cd apps/dsa-web && npm run test:smoke`
+
+Reference captures: `smoke-login-page-zh`, `smoke-home-page-zh`, `smoke-home-page-en`, `smoke-settings-page-zh`, `smoke-settings-page-en`, `smoke-mobile-shell-nav`.
 
 Compatibility clarification (Issue #777):
 
 - `dsa.uiLanguage` only changes UI locale persistence and copy rendering in the browser, and does not modify runtime persistence/cleanup/migration semantics for `provider`, `model`, or `base_url`.
 - The compatibility warnings seen in structural checks for this change are read-path-only signals (environmental false positives) and do not change runtime `provider/model/base_url` routing or migration logic; rollback is `revert this PR`.
+- Evidence trail added for this scope: `apps/dsa-web/src/contexts/__tests__/UiLanguageContext.test.tsx`, `apps/dsa-web/src/hooks/__tests__/useSystemConfig.test.tsx`, and backend tests  
+  `tests/test_system_config_service.py::test_runtime_env_fallback_does_not_override_saved_provider_and_base_url_settings`,  
+  `tests/test_system_config_service.py::test_get_config_runtime_env_fallback_does_not_persist_llm_fields_on_save`,  
+  `tests/test_system_config_service.py::test_get_config_uses_runtime_env_as_display_fallback`.
 
 ### API Endpoints
 

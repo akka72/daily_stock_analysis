@@ -2,6 +2,10 @@ import { expect, test, type Page } from '@playwright/test';
 
 const smokePassword = process.env.DSA_WEB_SMOKE_PASSWORD;
 
+if (!smokePassword) {
+  test.skip(true, 'Set DSA_WEB_SMOKE_PASSWORD to run authenticated smoke tests.');
+}
+
 
 async function captureSmokeScreenshot(page: Page, testInfo: { outputPath: (name: string) => string }, name: string, options: { fullPage?: boolean } = {}) {
   const path = testInfo.outputPath(`${name}.png`);
