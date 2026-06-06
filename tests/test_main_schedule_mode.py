@@ -599,7 +599,17 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     no_market_review=False,
                     allow_generate=False,
                     target_date=target_date,
+                    return_full_report=False,
+                ),
+                unittest.mock.call(
+                    config,
+                    pipeline=pipeline,
+                    region="cn",
+                    no_market_review=False,
+                    allow_generate=False,
+                    target_date=target_date,
                     return_full_report=True,
+                    require_current_query_match=True,
                 ),
             ]
         )
@@ -650,7 +660,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     no_market_review=False,
                     allow_generate=False,
                     target_date=target_date,
-                    return_full_report=True,
+                    return_full_report=False,
                 ),
                 unittest.mock.call(
                     config,
@@ -660,6 +670,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     allow_generate=False,
                     target_date=target_date,
                     return_full_report=True,
+                    require_current_query_match=True,
                 ),
             ]
         )
@@ -758,7 +769,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     no_market_review=False,
                     allow_generate=False,
                     target_date=target_date,
-                    return_full_report=True,
+                    return_full_report=False,
                 ),
                 unittest.mock.call(
                     config,
@@ -768,6 +779,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     allow_generate=False,
                     target_date=target_date,
                     return_full_report=True,
+                    require_current_query_match=True,
                 ),
             ]
         )
@@ -827,7 +839,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     no_market_review=False,
                     allow_generate=False,
                     target_date=target_date,
-                    return_full_report=True,
+                    return_full_report=False,
                 ),
                 unittest.mock.call(
                     config,
@@ -837,6 +849,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
                     allow_generate=False,
                     target_date=target_date,
                     return_full_report=True,
+                    require_current_query_match=True,
                 ),
             ]
         )

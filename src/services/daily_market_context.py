@@ -86,7 +86,7 @@ class DailyMarketContextService:
     ) -> None:
         self.db = db_manager or DatabaseManager.get_instance()
         self._today_fn = today_fn or date.today
-        self._cache: Dict[Tuple[date, str], DailyMarketContext] = {}
+        self._cache: Dict[Tuple[Any, ...], DailyMarketContext] = {}
         self._lock = threading.Lock()
 
     def get_context(
@@ -102,10 +102,16 @@ class DailyMarketContextService:
         persist_market_review_history: bool = True,
         target_date: Optional[date] = None,
         current_query_id: Optional[str] = None,
+        require_query_id_match: bool = False,
     ) -> Optional[DailyMarketContext]:
         normalized_region = _normalize_region(region)
         context_date = target_date or self._today_fn()
-        cache_key = (context_date, normalized_region)
+        cache_key = self._cache_key(
+            context_date=context_date,
+            region=normalized_region,
+            current_query_id=current_query_id,
+            require_query_id_match=require_query_id_match,
+        )
 
         if not force_refresh:
             cached = self._cache.get(cache_key)
@@ -116,6 +122,7 @@ class DailyMarketContextService:
                 region=normalized_region,
                 target_date=context_date,
                 current_query_id=current_query_id,
+                require_query_id_match=require_query_id_match,
             )
             if history_context is not None:
                 self._cache[cache_key] = history_context
@@ -131,6 +138,7 @@ class DailyMarketContextService:
                         region=normalized_region,
                         target_date=context_date,
                         current_query_id=current_query_id,
+                        require_query_id_match=require_query_id_match,
                     )
                     if history_context is not None:
                         self._cache[cache_key] = history_context
@@ -146,6 +154,7 @@ class DailyMarketContextService:
                     region=normalized_region,
                     target_date=context_date,
                     current_query_id=current_query_id,
+                    require_query_id_match=require_query_id_match,
                 )
                 if history_context is not None:
                     self._cache[cache_key] = history_context
@@ -159,6 +168,8 @@ class DailyMarketContextService:
                 analyzer=analyzer,
                 search_service=search_service,
                 persist_market_review_history=persist_market_review_history,
+                current_query_id=current_query_id,
+                require_query_id_match=require_query_id_match,
             )
             if generated is not None:
                 self._cache[cache_key] = generated
@@ -170,6 +181,7 @@ class DailyMarketContextService:
         region: str,
         target_date: date,
         current_query_id: Optional[str] = None,
+        require_query_id_match: bool = False,
     ) -> Optional[DailyMarketContext]:
         try:
             history_days = _history_lookup_days(
@@ -202,6 +214,7 @@ class DailyMarketContextService:
                 region=region,
                 target_date=target_date,
                 current_query_id=current_query_id,
+                require_query_id_match=require_query_id_match,
             ):
                 continue
 
@@ -227,6 +240,22 @@ class DailyMarketContextService:
                 return context
         return None
 
+    @staticmethod
+    def _cache_key(
+        *,
+        context_date: date,
+        region: str,
+        current_query_id: Optional[str] = None,
+        require_query_id_match: bool = False,
+    ) -> Tuple[Any, ...]:
+        if (
+            require_query_id_match
+            and isinstance(current_query_id, str)
+            and current_query_id.strip()
+        ):
+            return (context_date, region, current_query_id.strip())
+        return (context_date, region)
+
     def _run_market_review_context(
         self,
         *,
@@ -237,12 +266,19 @@ class DailyMarketContextService:
         analyzer: Any = None,
         search_service: Any = None,
         persist_market_review_history: bool = True,
+        current_query_id: Optional[str] = None,
+        require_query_id_match: bool = False,
     ) -> Optional[DailyMarketContext]:
         lock_token = try_acquire_market_review_lock(config)
         if lock_token is None:
             # Another process/thread is already refreshing market review context.
             # Keep fail-open and avoid duplicate execution.
-            return self._load_same_day_history(region=region, target_date=target_date)
+            return self._load_same_day_history(
+                region=region,
+                target_date=target_date,
+                current_query_id=current_query_id,
+                require_query_id_match=require_query_id_match,
+            )
 
         try:
             result = run_market_review(
@@ -522,12 +558,17 @@ def _record_matches_target_date(
     region: str,
     target_date: date,
     current_query_id: Optional[str] = None,
+    require_query_id_match: bool = False,
 ) -> bool:
     payload_date = _payload_trade_date(payload, region)
     if payload_date is not None:
+        if require_query_id_match:
+            return _record_matches_query_id(record, current_query_id)
         return payload_date == target_date or _record_matches_query_id(record, current_query_id)
 
     created_date = _coerce_date(getattr(record, "created_at", None))
+    if require_query_id_match:
+        return _record_matches_query_id(record, current_query_id)
     return created_date == target_date or _record_matches_query_id(record, current_query_id)
 
 

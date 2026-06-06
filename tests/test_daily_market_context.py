@@ -194,11 +194,43 @@ def test_reuses_same_run_history_when_saved_under_different_wall_clock_date() ->
             target_date=date(2026, 6, 5),
             allow_generate=False,
             current_query_id="same-run-q",
+            require_query_id_match=True,
         )
 
     assert context is not None
     assert context.trade_date == date(2026, 6, 5)
     assert context.source == "analysis_history"
+    run_review.assert_not_called()
+
+
+def test_does_not_reuse_history_for_different_query_when_query_match_required() -> None:
+    db = MagicMock()
+    db.get_analysis_history.return_value = [
+        _history_record(
+            created_at=datetime(2026, 6, 6, 9, 30),
+            payload_date="2026-06-05",
+            query_id="other-run-q",
+        )
+    ]
+    service = DailyMarketContextService(
+        db_manager=db,
+        today_fn=lambda: date(2026, 6, 6),
+    )
+
+    with patch("src.services.daily_market_context.run_market_review") as run_review:
+        context = service.get_context(
+            region="cn",
+            config=SimpleNamespace(report_language="zh"),
+            notifier=MagicMock(),
+            analyzer=MagicMock(),
+            search_service=MagicMock(),
+            target_date=date(2026, 6, 5),
+            allow_generate=False,
+            current_query_id="same-run-q",
+            require_query_id_match=True,
+        )
+
+    assert context is None
     run_review.assert_not_called()
 
 

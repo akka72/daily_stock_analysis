@@ -507,6 +507,7 @@ def _prime_daily_market_context(
     allow_generate: bool,
     target_date: Optional[date] = None,
     return_full_report: bool = False,
+    require_current_query_match: bool = False,
 ) -> Union[str, Tuple[str, str]]:
     """Load/reuse the run's market context, avoiding unbounded background generation."""
     if no_market_review or not region:
@@ -532,6 +533,7 @@ def _prime_daily_market_context(
         "allow_generate": allow_generate,
         "persist_market_review_history": False,
         "target_date": target_date,
+        "require_query_id_match": require_current_query_match,
     }
     current_query_id = getattr(pipeline, "query_id", None)
     if isinstance(current_query_id, str) and current_query_id.strip():
@@ -666,7 +668,21 @@ def run_full_analysis(
             daily_market_context_allow_generate=False,
         )
         if should_generate_market_context:
-            market_context_summary, market_context_full_report = _prime_daily_market_context(
+            # Prompt-side context can reuse historical summaries, while full-merge
+            # content must avoid silently reusing unrelated historical reports.
+            _prime_daily_market_context(
+                config,
+                pipeline=pipeline,
+                region=market_review_region,
+                no_market_review=args.no_market_review,
+                allow_generate=False,
+                target_date=daily_market_context_target_date,
+                return_full_report=False,
+            )
+            (
+                market_context_summary,
+                market_context_full_report,
+            ) = _prime_daily_market_context(
                 config,
                 pipeline=pipeline,
                 region=market_review_region,
@@ -674,6 +690,7 @@ def run_full_analysis(
                 allow_generate=False,
                 target_date=daily_market_context_target_date,
                 return_full_report=True,
+                require_current_query_match=True,
             )
             if not _can_reuse_market_context_for_review(
                 market_context_summary,
@@ -694,19 +711,7 @@ def run_full_analysis(
                 market_report = _market_review_report_text(review_result)
                 if market_report:
                     market_context_full_report = market_report
-                if market_report:
-                    (
-                        market_context_summary,
-                        market_context_full_report,
-                    ) = _prime_daily_market_context(
-                        config,
-                        pipeline=pipeline,
-                        region=market_review_region,
-                        no_market_review=args.no_market_review,
-                        allow_generate=False,
-                        target_date=daily_market_context_target_date,
-                        return_full_report=True,
-                    )
+                    market_context_summary = market_report
 
         # 1. 运行个股分析
         results = pipeline.run(
@@ -753,6 +758,7 @@ def run_full_analysis(
                     allow_generate=False,
                     target_date=daily_market_context_target_date,
                     return_full_report=True,
+                    require_current_query_match=True,
                 )
                 can_reuse_market_context = _can_reuse_market_context_for_review(
                     market_context_summary,
@@ -785,6 +791,7 @@ def run_full_analysis(
                     allow_generate=False,
                     target_date=daily_market_context_target_date,
                     return_full_report=True,
+                    require_current_query_match=True,
                 )
                 can_reuse_market_context = _can_reuse_market_context_for_review(
                     market_context_summary,
