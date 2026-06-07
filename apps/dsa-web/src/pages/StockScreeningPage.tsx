@@ -278,6 +278,7 @@ const StockScreeningPage: React.FC = () => {
   const [hotspots, setHotspots] = useState<AlphaSiftHotspot[]>([]);
   const [selectedHotspotTopic, setSelectedHotspotTopic] = useState<string | null>(null);
   const selectedHotspotTopicRef = useRef<string | null>(null);
+  const hotspotDetailRequestIdRef = useRef(0);
   const [hotspotDetail, setHotspotDetail] = useState<AlphaSiftHotspotDetail | null>(null);
   const [loadingHotspotDetail, setLoadingHotspotDetail] = useState(false);
   const [hotspotDetailError, setHotspotDetailError] = useState('');
@@ -325,16 +326,28 @@ const StockScreeningPage: React.FC = () => {
     if (!topic) {
       return;
     }
+    const requestId = hotspotDetailRequestIdRef.current + 1;
+    hotspotDetailRequestIdRef.current = requestId;
+    const isCurrentRequest = () => hotspotDetailRequestIdRef.current === requestId;
+    const canApplyRequest = () => isCurrentRequest() && selectedHotspotTopicRef.current === topic;
     setLoadingHotspotDetail(true);
     setHotspotDetailError('');
     try {
       const detail = await alphasiftApi.getHotspotDetail({ topic, provider: 'akshare' });
+      if (!canApplyRequest()) {
+        return;
+      }
       setHotspotDetail(detail);
     } catch (err) {
+      if (!canApplyRequest()) {
+        return;
+      }
       setHotspotDetail(null);
       setHotspotDetailError(toApiErrorMessage(err, '热点题材详情加载失败，请稍后重试。'));
     } finally {
-      setLoadingHotspotDetail(false);
+      if (isCurrentRequest()) {
+        setLoadingHotspotDetail(false);
+      }
     }
   }, []);
 
@@ -389,6 +402,7 @@ const StockScreeningPage: React.FC = () => {
   }, [loadHotspotDetail]);
 
   const handleHotspotSelect = useCallback((topic: string) => {
+    selectedHotspotTopicRef.current = topic;
     setSelectedHotspotTopic(topic);
   }, []);
 

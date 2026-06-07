@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import StockScreeningPage from '../StockScreeningPage';
 
@@ -82,6 +82,16 @@ const mockStrategiesResponse = {
   ],
   strategyCount: 1,
 };
+
+function createDeferred<T>() {
+  let resolve: (value: T) => void = () => {};
+  let reject: (reason?: unknown) => void = () => {};
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 describe('StockScreeningPage', () => {
   beforeEach(() => {
@@ -230,6 +240,89 @@ describe('StockScreeningPage', () => {
     );
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     expect(getHotspotDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores stale hotspot detail responses when switching themes', async () => {
+    getAlphaSiftStatus.mockResolvedValueOnce({
+      enabled: true,
+      available: true,
+      installSpecIsDefault: true,
+    });
+    getHotspots.mockResolvedValueOnce({
+      enabled: true,
+      provider: 'akshare',
+      providerUsed: 'akshare',
+      hotspots: [
+        {
+          topic: 'AI算力',
+          name: 'AI算力',
+          heatScore: 88,
+          stage: '加速主升',
+        },
+        {
+          topic: '机器人执行器',
+          name: '机器人执行器',
+          heatScore: 80,
+          stage: '轮动扩散',
+        },
+      ],
+      hotspotCount: 2,
+    });
+
+    const aiDetail = createDeferred<unknown>();
+    const robotDetail = createDeferred<unknown>();
+    getHotspotDetail.mockImplementation(({ topic }: { topic: string }) => {
+      if (topic === 'AI算力') {
+        return aiDetail.promise;
+      }
+      if (topic === '机器人执行器') {
+        return robotDetail.promise;
+      }
+      return Promise.reject(new Error(`unexpected topic: ${topic}`));
+    });
+
+    render(<StockScreeningPage />);
+
+    expect(await screen.findByText('选股已开启')).toBeInTheDocument();
+    await waitFor(() => expect(getHotspotDetail).toHaveBeenCalledWith({ topic: 'AI算力', provider: 'akshare' }));
+
+    fireEvent.click(screen.getByRole('button', { name: /机器人执行器/ }));
+
+    await waitFor(() =>
+      expect(getHotspotDetail).toHaveBeenLastCalledWith({ topic: '机器人执行器', provider: 'akshare' }),
+    );
+    await act(async () => {
+      robotDetail.resolve({
+        enabled: true,
+        provider: 'akshare',
+        topic: '机器人执行器',
+        name: '机器人执行器',
+        summary: '机器人执行器 继续发酵。',
+        route: [{ title: '机器人发酵', description: '执行器链条扩散。', source: 'eastmoney_board_change' }],
+        stocks: [{ code: '300111', name: '机器人龙头', role: '核心龙头', hotStockScore: 86 }],
+        stockCount: 1,
+      });
+    });
+
+    expect(await screen.findByText('机器人发酵')).toBeInTheDocument();
+
+    await act(async () => {
+      aiDetail.resolve({
+        enabled: true,
+        provider: 'akshare',
+        topic: 'AI算力',
+        name: 'AI算力',
+        summary: 'AI算力 旧响应。',
+        route: [{ title: 'AI旧发酵', description: '旧请求晚到。', source: 'eastmoney_board_change' }],
+        stocks: [{ code: '300000', name: '中际旭创', role: '核心龙头', hotStockScore: 88 }],
+        stockCount: 1,
+      });
+    });
+
+    expect(screen.getByText('机器人发酵')).toBeInTheDocument();
+    expect(screen.getByText('机器人龙头')).toBeInTheDocument();
+    expect(screen.queryByText('AI旧发酵')).not.toBeInTheDocument();
+    expect(screen.queryByText('中际旭创')).not.toBeInTheDocument();
   });
 
   it('reloads selected hotspot detail when refreshed themes keep the same topic', async () => {
