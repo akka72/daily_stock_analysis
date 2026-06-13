@@ -452,14 +452,12 @@ class BaseFetcher(ABC):
             if raw_df is None:
                 raise DataFetchError(f"[{self.name}] 未获取到 {stock_code} 的数据")
             if raw_df.empty:
-                if self.allow_empty_daily_data:
-                    elapsed = time.time() - request_start
-                    logger.info(
-                        f"[{self.name}] {stock_code} 返回空日线结果: 范围={start_date} ~ {end_date}, "
-                        f"elapsed={elapsed:.2f}s"
-                    )
-                    return raw_df.copy()
-                raise DataFetchError(f"[{self.name}] 未获取到 {stock_code} 的数据")
+                elapsed = time.time() - request_start
+                logger.info(
+                    f"[{self.name}] {stock_code} 返回空日线结果: 范围={start_date} ~ {end_date}, "
+                    f"elapsed={elapsed:.2f}s"
+                )
+                return raw_df.copy()
             
             # Step 2: 标准化列名
             df = self._normalize_data(raw_df, stock_code)
@@ -1305,6 +1303,8 @@ class DataFetcherManager:
                             fallback_to=fallback_to,
                             record_count=0,
                         )
+                        if df is not None and df.empty:
+                            self._record_daily_source_success(fetcher, market)
                     except Exception as e:
                         error_type, error_reason = summarize_exception(e)
                         error_msg = f"[{fetcher.name}] ({error_type}) {error_reason}"
@@ -1383,6 +1383,8 @@ class DataFetcherManager:
                     fallback_to=fallback_to,
                     record_count=0,
                 )
+                if df is not None and df.empty:
+                    self._record_daily_source_success(fetcher, market)
 
             except Exception as e:
                 error_type, error_reason = summarize_exception(e)
