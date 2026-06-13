@@ -2200,6 +2200,13 @@ class SearchService:
         r"software|soft|game|games|app|apps|package)(?:$|[/_.?&=-])",
         re.IGNORECASE,
     )
+    _BUSINESS_APP_METRIC_RE = re.compile(
+        r"(?:(?:下载量|安装量|装机量).{0,12}(?:增长|同比|环比|上升|增加|提升|突破|创新高)|"
+        r"(?:增长|同比|环比|上升|增加|提升|突破|创新高).{0,12}(?:下载量|安装量|装机量)|"
+        r"\b(?:downloads?|installs?)\b.{0,16}\b(?:grew|growth|rose|increase|increased|surged)\b|"
+        r"\b(?:grew|growth|rose|increase|increased|surged)\b.{0,16}\b(?:downloads?|installs?)\b)",
+        re.IGNORECASE,
+    )
     _ADULT_SERVICE_SPAM_STRONG_TERMS = (
         "上门特殊服务", "同城约", "约炮", "援交", "楼凤", "外围女",
         "外围服务", "包夜", "大保健", "莞式", "推油",
@@ -2727,16 +2734,18 @@ class SearchService:
         url_host = cls._candidate_hostname(item.url)
         source_host = cls._candidate_hostname(item.source)
 
-        for host in (url_host, source_host):
-            if any(
-                host == official_host or host.endswith(f".{official_host}")
-                for official_host in cls._OFFICIAL_SOURCE_HOSTS
-            ):
-                return True
-
         if url_host:
-            # 有 URL 时以主机可信链路为准，避免 source label 伪装的官方放行。
-            return False
+            # 有 URL 时以 URL 主机为准，避免 source label/host 伪装的官方放行。
+            return any(
+                url_host == official_host or url_host.endswith(f".{official_host}")
+                for official_host in cls._OFFICIAL_SOURCE_HOSTS
+            )
+
+        if source_host:
+            return any(
+                source_host == official_host or source_host.endswith(f".{official_host}")
+                for official_host in cls._OFFICIAL_SOURCE_HOSTS
+            )
 
         source_label = str(item.source or "").strip().lower()
         return source_label in cls._OFFICIAL_SOURCE_LABELS
@@ -2769,18 +2778,24 @@ class SearchService:
         has_file_size = bool(cls._LOW_QUALITY_FILE_SIZE_RE.search(content_text))
         has_rating = bool(cls._LOW_QUALITY_RATING_RE.search(content_text))
         has_url_signal = bool(cls._LOW_QUALITY_URL_RE.search(url_surface))
+        has_business_app_metric = bool(cls._BUSINESS_APP_METRIC_RE.search(content_text))
         has_app_listing_context = (
-            has_app_context
+            not has_business_app_metric
+            and has_app_context
             and has_app_metadata
             and (has_download_action or has_download_intent)
             and (has_file_size or has_rating)
         )
         has_content_download_page = (
-            has_download_intent
-            or (has_download_action and (has_app_metadata or has_file_size))
+            not has_business_app_metric
+            and (
+                has_download_intent
+                or (has_download_action and (has_app_metadata or has_file_size))
+            )
         )
         has_url_backed_download_page = (
-            has_url_signal
+            not has_business_app_metric
+            and has_url_signal
             and (
                 has_file_size
                 or has_download_intent

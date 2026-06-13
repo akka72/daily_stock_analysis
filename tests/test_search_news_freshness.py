@@ -715,6 +715,33 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
         )
         self.assertEqual(resp.results[0].relevance_category, "direct_company_news")
 
+    def test_app_download_growth_metric_does_not_trigger_download_filter(self) -> None:
+        """App download/install growth metrics are business news, not app-store pages."""
+        fresh = datetime.now().date().isoformat()
+        service, _ = self._create_service_with_mock_provider(
+            news_max_age_days=3,
+            news_strategy_profile="short",
+            response=_response(
+                [
+                    _result(
+                        "拼多多 PDD Temu 应用下载量增长",
+                        fresh,
+                        snippet="Temu 应用安装量同比提升，带动跨境业务收入改善。",
+                        url="https://finance.example.invalid/app/news/pdd-temu-downloads",
+                        source="finance.example.invalid",
+                    )
+                ]
+            ),
+        )
+
+        resp = service.search_stock_news("PDD", "PDD Holdings", max_results=1)
+
+        self.assertEqual(
+            [item.title for item in resp.results],
+            ["拼多多 PDD Temu 应用下载量增长"],
+        )
+        self.assertEqual(resp.results[0].relevance_category, "direct_company_news")
+
     def test_finance_client_boilerplate_does_not_trigger_download_filter(self) -> None:
         """Finance media boilerplate such as 客户端讯 should not look like an app page."""
         fresh = datetime.now().date().isoformat()
@@ -821,6 +848,13 @@ class SearchNewsFreshnessTestCase(unittest.TestCase):
                         snippet="安卓客户端下载，支持极速版下载。",
                         url="https://hkexnews.evil.invalid/guide/officialdownload",
                         source="hkexnews",
+                    ),
+                    _result(
+                        "腾讯控股 00700 SEC 官方app下载链接",
+                        fresh,
+                        snippet="安卓客户端下载，支持极速版下载。",
+                        url="https://spam.example.invalid/apps/sec-download",
+                        source="sec.gov",
                     ),
                     _result(
                         "腾讯控股 00700 发布回购公告",
