@@ -351,6 +351,83 @@ test('auto download prompt falls back to error when install path fails', async (
   });
 });
 
+test('auto update backup copies AlphaSift hotspot detail directories recursively', async (t) => {
+  const updaterEvents = {};
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa desktop updater details '));
+  const exeDir = path.join(tempRoot, 'app');
+  const userDataDir = path.join(tempRoot, 'userData');
+  const exePath = path.join(exeDir, 'Daily Stock Analysis.exe');
+  const uninstallPath = path.join(exeDir, 'Uninstall Daily Stock Analysis.exe');
+  const detailRelativePath = path.join('data', 'alphasift', 'hotspot_details');
+  const detailFileRelativePath = path.join(detailRelativePath, 'ai-compute.json');
+  const detailFile = path.join(exeDir, detailFileRelativePath);
+  const backupRoot = path.join(userDataDir, '.dsa-desktop-update-backup');
+  let quitAndInstallArgs = null;
+  const fakeUpdater = {
+    autoDownload: true,
+    autoInstallOnAppQuit: false,
+    on: (event, handler) => {
+      updaterEvents[event] = handler;
+    },
+    checkForUpdates: async () => {
+      if (typeof updaterEvents['update-downloaded'] === 'function') {
+        updaterEvents['update-downloaded']({
+          version: 'v3.13.0',
+          releaseDate: '2026-04-25T01:00:00Z',
+          releaseName: 'v3.13.0',
+        });
+      }
+    },
+    quitAndInstall: (...args) => {
+      quitAndInstallArgs = args;
+    },
+  };
+
+  const mainModule = loadMainModule(t, {
+    dialog: {
+      showMessageBox: async () => ({ response: 1 }),
+    },
+    electronUpdater: fakeUpdater,
+    platform: 'win32',
+    app: {
+      isPackaged: true,
+      getPath: (name) => {
+        if (name === 'exe') {
+          return exePath;
+        }
+        return userDataDir;
+      },
+    },
+  });
+
+  fs.mkdirSync(path.dirname(detailFile), { recursive: true });
+  fs.mkdirSync(userDataDir, { recursive: true });
+  fs.writeFileSync(uninstallPath, '');
+  fs.writeFileSync(detailFile, '{"topic":"AI算力"}\n', 'utf-8');
+
+  mainModule.__setMainWindowForTest({
+    isDestroyed: () => false,
+    webContents: {
+      send: () => undefined,
+    },
+  });
+
+  await mainModule.__getIpcMainHandler('desktop:check-for-updates')();
+  for (let idx = 0; idx < 12 && !quitAndInstallArgs; idx += 1) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+  }
+
+  assert.deepEqual(quitAndInstallArgs, [true, true]);
+  assert.equal(fs.readFileSync(path.join(backupRoot, detailFileRelativePath), 'utf-8'), '{"topic":"AI算力"}\n');
+  assert.ok(JSON.parse(fs.readFileSync(path.join(backupRoot, 'runtime-state.json'), 'utf-8')).files.includes(detailRelativePath));
+
+  t.after(() => {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  });
+});
+
 test('desktop update backup list includes WAL and SHM artifacts', (t) => {
   const mainModule = loadMainModule(t);
   const files = mainModule.DESKTOP_UPDATE_RUNTIME_RELATIVE_FILES || [];
