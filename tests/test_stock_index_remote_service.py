@@ -41,12 +41,19 @@ def _stock_index_payload(size: int = 100, *, name: str = "平安银行") -> list
     ]
 
 
-def _bse_stock_index_payload(size: int = 100) -> list[list[object]]:
+def _market_stock_index_payload(
+    *,
+    market: str,
+    canonical_code: str,
+    display_code: str,
+    name: str,
+    size: int = 100,
+) -> list[list[object]]:
     payload = _stock_index_payload(size=size)
-    payload[0][0] = "920964.BJ"
-    payload[0][1] = "920964"
-    payload[0][2] = "润农节水"
-    payload[0][6] = "BSE"
+    payload[0][0] = canonical_code
+    payload[0][1] = display_code
+    payload[0][2] = name
+    payload[0][6] = market
     return payload
 
 
@@ -166,8 +173,26 @@ def test_refresh_remote_stock_index_cache_rejects_invalid_remote_payload(tmp_pat
     assert json.loads(cache_path.read_text(encoding="utf-8"))[0][2] == "旧缓存"
 
 
-def test_validate_stock_index_payload_accepts_bse_market() -> None:
-    payload = _bse_stock_index_payload()
+@pytest.mark.parametrize(
+    ("market", "canonical_code", "display_code", "name"),
+    [
+        ("BSE", "920964.BJ", "920964", "润农节水"),
+        ("JP", "7203.T", "7203.T", "Toyota Motor"),
+        ("KR", "005930.KS", "005930.KS", "Samsung Electronics"),
+    ],
+)
+def test_validate_stock_index_payload_accepts_supported_markets(
+    market: str,
+    canonical_code: str,
+    display_code: str,
+    name: str,
+) -> None:
+    payload = _market_stock_index_payload(
+        market=market,
+        canonical_code=canonical_code,
+        display_code=display_code,
+        name=name,
+    )
 
     assert service.validate_stock_index_payload(payload) is payload
 
