@@ -748,7 +748,7 @@ const SettingsPage: React.FC = () => {
     setIsImportingEnv(true);
     try {
       const content = await file.text();
-      await systemConfigApi.importEnv({
+      const importResult = await systemConfigApi.importEnv({
         configVersion,
         content,
         reloadNow: true,
@@ -762,6 +762,9 @@ const SettingsPage: React.FC = () => {
           category: 'http_error',
         }));
         return;
+      }
+      if (importResult.updatedKeys.some((key) => SCHEDULER_SETTING_KEYS.has(key))) {
+        setSchedulerStatusRefreshToken((current) => current + 1);
       }
       notifySystemConfigChanged();
       setEnvBackupActionSuccess(t('settings.envImported'));

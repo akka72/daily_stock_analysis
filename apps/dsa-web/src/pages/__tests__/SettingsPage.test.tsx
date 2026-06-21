@@ -1532,6 +1532,105 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
   });
 
+  it('refreshes scheduler status after successful env import updates scheduler settings', async () => {
+    (window as { dsaDesktop?: unknown }).dsaDesktop = { version: '3.12.0' };
+    const configState = buildSystemConfigState();
+    getSchedulerStatus
+      .mockResolvedValueOnce({
+        enabled: false,
+        running: false,
+        scheduleTimes: ['18:00'],
+        nextRunAt: null,
+        lastRunAt: null,
+        lastSuccessAt: null,
+        lastError: null,
+      })
+      .mockResolvedValueOnce({
+        enabled: true,
+        running: false,
+        scheduleTimes: ['09:20', '15:10'],
+        nextRunAt: '2026-06-21T09:20:00+08:00',
+        lastRunAt: null,
+        lastSuccessAt: null,
+        lastError: null,
+      });
+    importEnv.mockResolvedValueOnce({
+      success: true,
+      configVersion: 'v2',
+      appliedCount: 2,
+      skippedMaskedCount: 0,
+      reloadTriggered: true,
+      updatedKeys: ['SCHEDULE_ENABLED', 'SCHEDULE_TIMES'],
+      warnings: [],
+    });
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      activeCategory: 'system',
+      itemsByCategory: {
+        ...configState.itemsByCategory,
+        system: [
+          ...configState.itemsByCategory.system,
+          {
+            key: 'SCHEDULE_ENABLED',
+            value: 'false',
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key: 'SCHEDULE_ENABLED',
+              category: 'system',
+              dataType: 'boolean',
+              uiControl: 'switch',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: {},
+              displayOrder: 8,
+            },
+          },
+          {
+            key: 'SCHEDULE_TIMES',
+            value: '18:00',
+            rawValueExists: true,
+            isMasked: false,
+            schema: {
+              key: 'SCHEDULE_TIMES',
+              category: 'system',
+              dataType: 'string',
+              uiControl: 'text',
+              isSensitive: false,
+              isRequired: false,
+              isEditable: true,
+              options: [],
+              validation: {},
+              displayOrder: 11,
+            },
+          },
+        ],
+      },
+    }));
+
+    const { container } = render(<SettingsPage />);
+
+    await waitFor(() => expect(getSchedulerStatus).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('未启用')).toBeInTheDocument();
+
+    vi.clearAllMocks();
+
+    const input = container.querySelector('input[type="file"]');
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: {
+        files: [new File(['SCHEDULE_ENABLED=true\nSCHEDULE_TIMES=09:20,15:10\n'], 'desktop-backup.env', { type: 'text/plain' })],
+      },
+    });
+
+    await waitFor(() => expect(importEnv).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getSchedulerStatus).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('已启用')).toBeInTheDocument();
+  });
+
   it('shows an error when env import succeeds but reload fails', async () => {
     (window as { dsaDesktop?: unknown }).dsaDesktop = { version: '3.12.0' };
     load.mockResolvedValue(false);
