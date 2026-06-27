@@ -48,6 +48,23 @@ class TestMarketAnalyzerStrategyPrompt(unittest.TestCase):
         self.assertIn("Strategy Plan", prompt)
         self.assertIn("US Market Regime Strategy", prompt)
 
+    def test_jp_kr_prompt_uses_region_aware_english_shell(self):
+        cases = [
+            ("jp", "Japan market"),
+            ("kr", "Korea market"),
+        ]
+
+        for region, market_scope_name in cases:
+            with self.subTest(region=region), patch(
+                "src.market_analyzer.get_config",
+                return_value=SimpleNamespace(report_language="en"),
+            ):
+                analyzer = MarketAnalyzer(region=region)
+                prompt = analyzer._build_review_prompt(MarketOverview(date="2026-02-24"), [])
+
+            self.assertIn(f"professional {market_scope_name} analyst", prompt)
+            self.assertNotIn("professional US/A/H market analyst", prompt)
+
     def test_us_prompt_localizes_strategy_markdown_when_report_language_is_zh(self):
         with patch("src.market_analyzer.get_config", return_value=SimpleNamespace(report_language="zh")):
             analyzer = MarketAnalyzer(region="us")

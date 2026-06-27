@@ -1232,6 +1232,9 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             context_profile_schema["validation"]["enum"],
             ["cost", "balanced", "long_context_raw_first"],
         )
+        market_review_schema = items["MARKET_REVIEW_REGION"]["schema"]
+        self.assertTrue(market_review_schema["validation"]["multi_value"])
+        self.assertEqual(market_review_schema["validation"]["delimiter"], ",")
         self.assertEqual(
             items["AGENT_CONTEXT_COMPRESSION_TRIGGER_TOKENS"]["schema"]["default_value"],
             "",
@@ -1266,6 +1269,14 @@ class SystemConfigServiceTestCase(unittest.TestCase):
 
     def test_validate_accepts_report_language_english(self) -> None:
         validation = self.service.validate(items=[{"key": "REPORT_LANGUAGE", "value": "en"}])
+
+        self.assertTrue(validation["valid"])
+        self.assertEqual(validation["issues"], [])
+
+    def test_validate_accepts_comma_separated_market_review_region(self) -> None:
+        validation = self.service.validate(
+            items=[{"key": "MARKET_REVIEW_REGION", "value": "cn,jp,us"}]
+        )
 
         self.assertTrue(validation["valid"])
         self.assertEqual(validation["issues"], [])
@@ -2971,6 +2982,29 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             any("已同步清理失效的运行时模型引用" in warning for warning in response["warnings"]),
             response["warnings"],
         )
+
+    def test_update_market_review_region_accepts_comma_separated_regions(self) -> None:
+        response = self.service.update(
+            config_version=self.manager.get_config_version(),
+            items=[{"key": "MARKET_REVIEW_REGION", "value": "cn,jp,us"}],
+            reload_now=False,
+        )
+
+        self.assertTrue(response["success"])
+        self.assertIn("MARKET_REVIEW_REGION", response["updated_keys"])
+        current_map = self.manager.read_config_map()
+        self.assertEqual(current_map["MARKET_REVIEW_REGION"], "cn,jp,us")
+
+    def test_import_env_market_review_region_accepts_comma_separated_regions(self) -> None:
+        response = self.service.import_env(
+            config_version=self.manager.get_config_version(),
+            content="MARKET_REVIEW_REGION=jp,kr\n",
+            reload_now=False,
+        )
+
+        self.assertTrue(response["success"])
+        current_map = self.manager.read_config_map()
+        self.assertEqual(current_map["MARKET_REVIEW_REGION"], "jp,kr")
 
     def test_import_desktop_env_restores_runtime_models_after_cleanup(self) -> None:
         self._rewrite_env(

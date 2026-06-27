@@ -1877,17 +1877,23 @@ class SystemConfigService:
                     }
                 )
 
-        if "enum" in validation and value and value not in validation["enum"]:
-            issues.append(
-                {
-                    "key": key,
-                    "code": "invalid_enum",
-                    "message": "Value is not in allowed options",
-                    "severity": "error",
-                    "expected": ",".join(validation["enum"]),
-                    "actual": value,
-                }
-            )
+        if "enum" in validation and value:
+            raw_values = [value]
+            delimiter = validation.get("delimiter")
+            if validation.get("multi_value") and delimiter:
+                raw_values = [item.strip() for item in value.split(delimiter) if item.strip()]
+            invalid_values = [item for item in raw_values if item not in validation["enum"]]
+            if invalid_values:
+                issues.append(
+                    {
+                        "key": key,
+                        "code": "invalid_enum",
+                        "message": "Value is not in allowed options",
+                        "severity": "error",
+                        "expected": ",".join(validation["enum"]),
+                        "actual": ",".join(invalid_values),
+                    }
+                )
 
         if "allowed_values" in validation and value:
             delimiter = validation.get("delimiter")

@@ -1236,6 +1236,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _build_review_prompt(self, overview: MarketOverview, news: List) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
+        market_scope_name_en = self._get_market_scope_name("en")
 
         # 指数行情信息（简洁格式，不用emoji）
         indices_text = ""
@@ -1320,7 +1321,7 @@ Concept lagging: {bottom_concepts_text if bottom_concepts_text else "N/A"}"""
 
         if review_language == "en":
             report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
-            return f"""You are a professional US/A/H market analyst. Please produce a concise market recap report based on the data below.
+            return f"""You are a professional {market_scope_name_en} analyst. Please produce a concise market recap report based on the data below.
 
 [Requirements]
 - Output pure Markdown only

@@ -3335,7 +3335,11 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "is_editable": True,
         "default_value": "cn",
         "options": ["cn", "hk", "us", "jp", "kr", "both"],
-        "validation": {"enum": ["cn", "hk", "us", "jp", "kr", "both"]},
+        "validation": {
+            "enum": ["cn", "hk", "us", "jp", "kr", "both"],
+            "multi_value": True,
+            "delimiter": ",",
+        },
         "display_order": 48,
         "help_key": "settings.system.market_review",
         "examples": [
