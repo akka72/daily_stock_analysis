@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] Web 首页重新分析完成后自动切换到同一股票最新生成的报告，避免仍停留在旧报告内容。
 - [改进] AlphaSift 默认依赖 pin 更新到 `0a7b9cd59e81718f851890535241bc105d4ddc64`，纳入上游日线数据源健康度、硬过滤诊断、策略评估摘要和 LLM 排名解析稳定性改进。
 - [改进] AlphaSift 热点默认走 DSA EastMoney 兜底 provider，选股运行期默认提高日线抓取重试并在状态接口暴露 snapshot/daily source health，便于定位不稳定数据源。
+- [文档] 新增数据源稳定性与故障处理图示，说明 Tushare、TickFlow、AkShare、Efinance、YFinance、Longbridge 等已接入源的使用场景、fallback 链路和推荐配置。
 - [新功能] #1754 在 Web AI 建议页新增单股信号时间线，并为自动生成与历史回填的 DecisionSignal 写入默认 decision_profile metadata。
 
 - [修复] 默认通知报告补充展示 `dashboard.phase_decision` 盘中决策护栏字段，避免与模板渲染路径展示不一致。

@@ -1,5 +1,7 @@
 # AlphaSift 选股集成说明
 
+数据源失败、fallback 链路和 Tushare / TickFlow / AkShare 等已接入源的推荐配置图示见 [数据源稳定性与故障处理图示](data-source-stability.md)。
+
 AlphaSift 作为独立仓库维护的选股引擎接入 DSA。DSA 默认不启用它，也不把 AlphaSift 的策略逻辑复制进主仓库；后端依赖会随 `requirements.txt` 安装，启用后只通过 `alphasift.dsa_adapter` 稳定适配层调用 AlphaSift。
 
 ## 当前方案
