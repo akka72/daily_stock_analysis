@@ -533,6 +533,45 @@ class AuthApiTestCase(unittest.TestCase):
         self.assertIn(b'"error":"current_required"', response.body)
         self.assertIn("ADMIN_AUTH_ENABLED=true", self.env_path.read_text(encoding="utf-8"))
 
+    def test_auth_settings_rejects_disable_on_public_bind_without_override(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"DSA_WEBUI_BOUND_HOST": "0.0.0.0", "DSA_ALLOW_INSECURE_PUBLIC_API": ""},
+            clear=False,
+        ), patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.set_initial_password("passwd6")
+            response = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    self._build_request(),
+                    auth_endpoint.AuthSettingsRequest(authEnabled=False, currentPassword="passwd6"),
+                )
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'"error":"public_bind_requires_auth"', response.body)
+        self.assertIn("ADMIN_AUTH_ENABLED=true", self.env_path.read_text(encoding="utf-8"))
+
+    def test_auth_settings_rejects_disable_for_remote_client_when_bound_host_unknown(self) -> None:
+        request = self._build_request()
+        request.client = SimpleNamespace(host="203.0.113.10")
+
+        with patch.dict(
+            os.environ,
+            {"DSA_WEBUI_BOUND_HOST": "", "WEBUI_HOST": "", "DSA_ALLOW_INSECURE_PUBLIC_API": ""},
+            clear=False,
+        ), patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
+            auth.set_initial_password("passwd6")
+            response = asyncio.run(
+                auth_endpoint.auth_update_settings(
+                    request,
+                    auth_endpoint.AuthSettingsRequest(authEnabled=False, currentPassword="passwd6"),
+                )
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(b'"error":"public_bind_requires_auth"', response.body)
+        self.assertIn("ADMIN_AUTH_ENABLED=true", self.env_path.read_text(encoding="utf-8"))
+
     def test_auth_settings_toggle_fails_when_secret_rotation_fails(self) -> None:
         with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
             auth.set_initial_password("passwd6")
@@ -680,7 +719,7 @@ class AuthApiTestCase(unittest.TestCase):
         with patch.object(auth, "_is_auth_enabled_from_env", side_effect=self._read_auth_enabled_from_env):
             # 1. Setup an existing password, auth is currently disabled
             auth.set_initial_password("passwd6")
-            
+
             # 2. Simulate the race condition:
             # The middleware let the request through because auth was supposedly False.
             # But just before the handler runs, another thread enables auth.
@@ -688,7 +727,7 @@ class AuthApiTestCase(unittest.TestCase):
                 "STOCK_LIST=600519\nGEMINI_API_KEY=test\nADMIN_AUTH_ENABLED=true\n",
                 encoding="utf-8",
             )
-            auth.refresh_auth_state() # simulate the flip to True
+            auth.refresh_auth_state()  # simulate the flip to True
 
             # 3. The attacker tries to re-enable auth without a password or valid cookie
             response = asyncio.run(

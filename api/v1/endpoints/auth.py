@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 
@@ -33,6 +34,12 @@ from src.auth import (
 )
 from src.config import Config, setup_env
 from src.core.config_manager import ConfigManager
+from src.webui_security import (
+    current_webui_bound_host,
+    is_insecure_public_api_allowed,
+    is_public_bind_host,
+    public_auth_guard_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +189,32 @@ def _get_auth_status_dict(request: Request | None = None) -> dict:
     }
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    normalized = (host or "").strip()
+    if not normalized:
+        return False
+    if normalized.lower() in {"localhost", "[::1]", "::1"}:
+        return True
+
+    normalized = normalized.strip("[]")
+    normalized = normalized.split("%", 1)[0]
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _public_bind_requires_auth(request: Request) -> tuple[bool, str]:
+    bound_host = current_webui_bound_host()
+    if is_insecure_public_api_allowed():
+        return False, bound_host
+    if is_public_bind_host(bound_host):
+        return True, bound_host
+    if not bound_host and not _is_loopback_host(request.client.host if request.client else None):
+        return True, bound_host
+    return False, bound_host
+
+
 @router.get(
     "/status",
     summary="Get auth status",
@@ -210,6 +243,17 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
     password = (body.password or "").strip()
     confirm = (body.password_confirm or "").strip()
     current_password = (body.current_password or "").strip()
+
+    if current_enabled and not target_enabled:
+        public_bind_requires_auth, bound_host = _public_bind_requires_auth(request)
+        if public_bind_requires_auth:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "public_bind_requires_auth",
+                    "message": public_auth_guard_message(bound_host),
+                },
+            )
 
     if target_enabled:
         if password or confirm:
@@ -258,7 +302,7 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
             cookie_val = request.cookies.get(COOKIE_NAME)
             # if target_enabled is True here, they are requesting to enable or keep auth enabled
             is_valid_session = cookie_val and verify_session(cookie_val)
-            
+
             if not is_valid_session:
                 if not current_password:
                     return JSONResponse(
@@ -351,7 +395,6 @@ async def auth_update_settings(request: Request, body: AuthSettingsRequest):
     resp = JSONResponse(content=_get_auth_status_dict(request))
     resp.delete_cookie(key=COOKIE_NAME, path="/")
     return resp
-
 
 
 @router.post(
