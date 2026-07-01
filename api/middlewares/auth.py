@@ -6,6 +6,7 @@ Auth middleware: protect /api/v1/* when admin auth is enabled.
 from __future__ import annotations
 
 import logging
+import ipaddress
 from typing import Callable
 
 from fastapi import Request
@@ -40,6 +41,43 @@ def _path_exempt(path: str) -> bool:
     return normalized in EXEMPT_PATHS
 
 
+def _is_loopback_host(host: str | None) -> bool:
+    normalized = (host or "").strip()
+    if not normalized:
+        return False
+    if normalized.lower() in {"localhost", "[::1]", "::1"}:
+        return True
+
+    normalized = normalized.strip("[]")
+    normalized = normalized.split("%", 1)[0]
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_loopback_client(request: Request) -> bool:
+    return _is_loopback_host(request.client.host if request.client else None)
+
+
+def _get_effective_bound_host(request: Request) -> str:
+    """Return runtime bind host from request scope when available."""
+    server_host: str = ""
+    server = request.scope.get("server")
+    if isinstance(server, tuple) and len(server) > 0:
+        candidate = server[0]
+        if isinstance(candidate, str):
+            server_host = candidate.strip()
+    if server_host:
+        return server_host
+
+    url_host = request.url.hostname
+    if url_host:
+        return str(url_host)
+
+    return current_webui_bound_host()
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """Require valid session for /api/v1/* when auth is enabled."""
 
@@ -53,10 +91,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         if not is_auth_enabled():
-            bound_host = current_webui_bound_host()
+            bound_host = _get_effective_bound_host(request)
             if (
                 path.startswith("/api/v1/")
-                and is_public_bind_host(bound_host)
+                and (
+                    is_public_bind_host(bound_host)
+                    or (not bound_host and not _is_loopback_client(request))
+                )
                 and not is_insecure_public_api_allowed()
             ):
                 return JSONResponse(
