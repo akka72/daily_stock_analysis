@@ -312,6 +312,22 @@ class StockAnalyzerBiasTestCase(unittest.TestCase):
                 self.analyzer._generate_signal(result)
                 self.assertEqual(result.signal_score, expected_score)
                 self.assertEqual(signal_key_for_score(result.signal_score), expected_scale_key)
-                self.assertEqual(action_for_score(result.signal_score), expected_scale_action)
-                self.assertEqual(decision_type_for_score(result.signal_score), expected_scale_decision_type)
-                self.assertEqual(result.buy_signal, expected_signal)
+            self.assertEqual(action_for_score(result.signal_score), expected_scale_action)
+            self.assertEqual(decision_type_for_score(result.signal_score), expected_scale_decision_type)
+            self.assertEqual(result.buy_signal, expected_signal)
+
+    @patch("src.stock_analyzer.get_config")
+    def test_non_bull_high_score_falls_back_to_wait(self, mock_get_config: MagicMock) -> None:
+        mock_get_config.return_value.bias_threshold = 5.0
+        result = _make_result(
+            trend_status=TrendStatus.WEAK_BEAR,
+            bias_ma5=-1.5,
+            volume_status=VolumeStatus.SHRINK_VOLUME_DOWN,
+            macd_status=MACDStatus.GOLDEN_CROSS,
+            rsi_status=RSIStatus.OVERSOLD,
+            support_ma5=True,
+            support_ma10=True,
+        )
+        self.analyzer._generate_signal(result)
+        self.assertEqual(result.signal_score, 75)
+        self.assertEqual(result.buy_signal, BuySignal.WAIT)

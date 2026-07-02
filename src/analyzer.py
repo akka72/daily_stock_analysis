@@ -1847,6 +1847,9 @@ def populate_decision_action_fields(
         explicit_action=action_source,
         report_type=report_type,
         report_language=getattr(result, "report_language", "zh"),
+        sentiment_score=getattr(result, "sentiment_score", None),
+        guardrail_reason=getattr(result, "guardrail_reason", None),
+        align_with_score=True,
     )
     result.action = fields["action"]
     result.action_label = fields["action_label"]
