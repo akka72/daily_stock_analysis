@@ -757,13 +757,16 @@ class AgentOrchestrator:
             daily_market_context = context.get("daily_market_context")
             if isinstance(daily_market_context, dict) and daily_market_context:
                 ctx.meta["daily_market_context"] = dict(daily_market_context)
+            market_structure_context = context.get("market_structure_context")
+            if isinstance(market_structure_context, dict) and market_structure_context:
+                ctx.meta["market_structure_context"] = dict(market_structure_context)
             analysis_context_pack_summary = context.get("analysis_context_pack_summary")
             if isinstance(analysis_context_pack_summary, str) and analysis_context_pack_summary:
                 ctx.meta["analysis_context_pack_summary"] = analysis_context_pack_summary
 
             # Pre-populate data fields that the caller already has
             for data_key in ("realtime_quote", "daily_history", "chip_distribution",
-                             "trend_result", "news_context"):
+                             "trend_result", "news_context", "market_structure_context"):
                 if context.get(data_key):
                     ctx.set_data(data_key, context[data_key])
 

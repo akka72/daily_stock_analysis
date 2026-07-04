@@ -261,18 +261,27 @@ class ReportDetails(BaseModel):
     belong_boards: Optional[Any] = Field(None, description="关联板块列表")
     sector_rankings: Optional[Any] = Field(None, description="板块涨跌榜（结构 {top, bottom}）")
     concept_rankings: Optional[Any] = Field(None, description="概念板块涨跌榜（结构 {top, bottom}）")
+    market_structure: Optional[Any] = Field(None, description="市场结构上下文（题材层 + 个股位置层）")
 
     @model_validator(mode="after")
-    def populate_concept_rankings_from_context(self) -> "ReportDetails":
-        if self.concept_rankings is not None or self.context_snapshot is None:
+    def populate_context_derived_details(self) -> "ReportDetails":
+        if self.context_snapshot is None:
             return self
-        try:
-            from src.utils.data_processing import extract_board_detail_fields
+        if self.concept_rankings is None:
+            try:
+                from src.utils.data_processing import extract_board_detail_fields
 
-            extracted = extract_board_detail_fields(self.context_snapshot)
-            self.concept_rankings = extracted.get("concept_rankings")
-        except Exception:
-            self.concept_rankings = None
+                extracted = extract_board_detail_fields(self.context_snapshot)
+                self.concept_rankings = extracted.get("concept_rankings")
+            except Exception:
+                self.concept_rankings = None
+        if self.market_structure is None:
+            try:
+                from src.utils.data_processing import extract_market_structure_detail_field
+
+                self.market_structure = extract_market_structure_detail_field(self.context_snapshot)
+            except Exception:
+                self.market_structure = None
         return self
 
 

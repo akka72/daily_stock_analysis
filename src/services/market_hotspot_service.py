@@ -1,0 +1,353 @@
+# -*- coding: utf-8 -*-
+"""DSA-native market hotspot context service.
+
+This service intentionally does not import AlphaSift.  It builds the first
+market-theme layer from DSA's existing industry/concept ranking providers and
+returns explicit data-quality markers when richer hotspot evidence is missing.
+"""
+
+from __future__ import annotations
+
+import logging
+import copy
+import threading
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
+
+from data_provider import DataFetcherManager
+
+from src.schemas.market_structure import (
+    MarketStructureDataQuality,
+    MarketStructureSource,
+    MarketThemeContext,
+    MarketThemeItem,
+    RankedThemeItem,
+    ThemeBreadth,
+    ThemeRankSource,
+    dump_market_structure_model,
+)
+
+
+logger = logging.getLogger(__name__)
+
+
+class MarketHotspotService:
+    """Build low-sensitive A-share market/theme context from DSA rankings."""
+
+    def __init__(self, fetcher_manager: Optional[DataFetcherManager] = None) -> None:
+        self.fetcher_manager = fetcher_manager or DataFetcherManager()
+        self._hotspots_cache: Dict[Tuple[str, Optional[str], int], Dict[str, Any]] = {}
+        self._hotspots_cache_lock = threading.Lock()
+
+    def get_hotspots(
+        self,
+        *,
+        market: str,
+        trade_date: Any = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
+        normalized_market = str(market or "cn").strip().lower() or "cn"
+        trade_date_text = self._format_trade_date(trade_date)
+        try:
+            limit = max(1, int(limit or 5))
+        except (TypeError, ValueError):
+            limit = 5
+
+        cache_key = (normalized_market, trade_date_text, limit)
+        cached = self._get_cached_hotspots(cache_key)
+        if cached is not None:
+            return cached
+
+        if normalized_market != "cn":
+            context = MarketThemeContext(
+                status="not_supported",
+                market=normalized_market,
+                trade_date=trade_date_text,
+                data_quality=MarketStructureDataQuality(
+                    status="not_supported",
+                    missing_fields=["industry_rankings", "concept_rankings"],
+                    sources=[
+                        MarketStructureSource(
+                            provider="dsa",
+                            dataset="sector_rankings",
+                            status="not_supported",
+                            message="market structure hotspots are only supported for A-share first version",
+                        )
+                    ],
+                ),
+            )
+            return self._store_cached_hotspots(cache_key, dump_market_structure_model(context))
+
+        errors: List[str] = []
+        sources: List[MarketStructureSource] = []
+        top_industries, bottom_industries = self._fetch_rankings(
+            "get_sector_rankings",
+            "sector_rankings",
+            limit,
+            errors,
+            sources,
+        )
+        top_concepts, bottom_concepts = self._fetch_rankings(
+            "get_concept_rankings",
+            "concept_rankings",
+            limit,
+            errors,
+            sources,
+        )
+
+        leading_industries = self._normalize_ranked_items(top_industries, "industry")
+        leading_concepts = self._normalize_ranked_items(top_concepts, "concept")
+        lagging_themes = self._normalize_ranked_items(
+            list(bottom_industries or []) + list(bottom_concepts or []),
+            "unknown",
+        )
+        active_themes = self._build_active_themes(
+            list(leading_industries) + list(leading_concepts),
+            limit=limit,
+        )
+
+        missing_fields: List[str] = []
+        if not leading_industries and not bottom_industries:
+            missing_fields.append("industry_rankings")
+        if not leading_concepts and not bottom_concepts:
+            missing_fields.append("concept_rankings")
+
+        has_any_ranking = bool(leading_industries or leading_concepts or lagging_themes)
+        if active_themes and not missing_fields and not errors:
+            status = "ok"
+        elif has_any_ranking:
+            status = "partial"
+        else:
+            status = "unknown"
+
+        context = MarketThemeContext(
+            status=status,
+            market=normalized_market,
+            trade_date=trade_date_text,
+            active_themes=active_themes,
+            leading_industries=leading_industries,
+            leading_concepts=leading_concepts,
+            lagging_themes=lagging_themes[:limit],
+            theme_breadth=ThemeBreadth(
+                active_count=len(active_themes),
+                leading_industry_count=len(leading_industries),
+                leading_concept_count=len(leading_concepts),
+                lagging_count=len(lagging_themes),
+            ),
+            data_quality=MarketStructureDataQuality(
+                status=status,
+                missing_fields=missing_fields,
+                sources=sources,
+                errors=errors,
+            ),
+        )
+        return self._store_cached_hotspots(cache_key, dump_market_structure_model(context))
+
+    def get_hotspot_detail(self, theme_name: str, market: str = "cn") -> Dict[str, Any]:
+        """Return an explicit placeholder for richer hotspot detail evidence."""
+        normalized_market = str(market or "cn").strip().lower() or "cn"
+        status = "unknown" if normalized_market == "cn" else "not_supported"
+        return {
+            "theme_name": str(theme_name or "").strip(),
+            "market": normalized_market,
+            "status": status,
+            "missing_fields": ["hotspot_route", "hotspot_constituents", "leader_stocks"],
+        }
+
+    def _get_cached_hotspots(
+        self,
+        cache_key: Tuple[str, Optional[str], int],
+    ) -> Optional[Dict[str, Any]]:
+        with self._hotspots_cache_lock:
+            cached = self._hotspots_cache.get(cache_key)
+            return copy.deepcopy(cached) if cached is not None else None
+
+    def _store_cached_hotspots(
+        self,
+        cache_key: Tuple[str, Optional[str], int],
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        with self._hotspots_cache_lock:
+            self._hotspots_cache[cache_key] = copy.deepcopy(payload)
+        return copy.deepcopy(payload)
+
+    def _fetch_rankings(
+        self,
+        fetch_name: str,
+        dataset: str,
+        limit: int,
+        errors: List[str],
+        sources: List[MarketStructureSource],
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        fetch_rankings = getattr(self.fetcher_manager, fetch_name, None)
+        if not callable(fetch_rankings):
+            sources.append(
+                MarketStructureSource(
+                    provider="dsa",
+                    dataset=dataset,
+                    status="missing",
+                    message=f"{fetch_name} is unavailable",
+                )
+            )
+            return [], []
+
+        try:
+            rankings = fetch_rankings(limit)
+            if isinstance(rankings, tuple) and len(rankings) == 2:
+                top, bottom = rankings
+                top_items = list(top) if isinstance(top, list) else []
+                bottom_items = list(bottom) if isinstance(bottom, list) else []
+                sources.append(
+                    MarketStructureSource(
+                        provider="dsa",
+                        dataset=dataset,
+                        status="ok" if top_items or bottom_items else "empty",
+                    )
+                )
+                return top_items, bottom_items
+            sources.append(
+                MarketStructureSource(
+                    provider="dsa",
+                    dataset=dataset,
+                    status="invalid",
+                    message="ranking provider returned an invalid payload",
+                )
+            )
+        except Exception as exc:
+            logger.debug("market hotspot ranking fetch failed dataset=%s: %s", dataset, exc)
+            errors.append(f"{dataset}: {exc}")
+            sources.append(
+                MarketStructureSource(
+                    provider="dsa",
+                    dataset=dataset,
+                    status="failed",
+                    message=str(exc),
+                )
+            )
+        return [], []
+
+    def _normalize_ranked_items(
+        self,
+        items: Any,
+        source: ThemeRankSource,
+    ) -> List[RankedThemeItem]:
+        if not isinstance(items, list):
+            return []
+
+        normalized: List[RankedThemeItem] = []
+        for index, item in enumerate(items, 1):
+            if not isinstance(item, dict):
+                continue
+            name = self._optional_text(
+                item.get("name")
+                or item.get("板块名称")
+                or item.get("概念名称")
+                or item.get("行业名称")
+            )
+            if not name:
+                continue
+            change_pct = self._safe_float(
+                item.get("change_pct")
+                if "change_pct" in item
+                else item.get("pct_chg")
+                if "pct_chg" in item
+                else item.get("涨跌幅")
+                if "涨跌幅" in item
+                else item.get("涨跌幅%")
+            )
+            normalized.append(
+                RankedThemeItem(
+                    name=name,
+                    code=self._optional_text(item.get("code") or item.get("板块代码")),
+                    change_pct=change_pct,
+                    rank=self._safe_int(item.get("rank")) or index,
+                    source=source,
+                    updated_at=self._optional_text(item.get("updated_at")),
+                )
+            )
+        return normalized
+
+    def _build_active_themes(
+        self,
+        items: List[RankedThemeItem],
+        *,
+        limit: int,
+    ) -> List[MarketThemeItem]:
+        positive_items = [
+            item for item in items if item.change_pct is not None and item.change_pct > 0
+        ]
+        positive_items.sort(key=lambda item: item.change_pct or 0, reverse=True)
+
+        active: List[MarketThemeItem] = []
+        for item in positive_items[:limit]:
+            active.append(
+                MarketThemeItem(
+                    name=item.name,
+                    code=item.code,
+                    change_pct=item.change_pct,
+                    rank=item.rank,
+                    source=item.source,
+                    updated_at=item.updated_at,
+                    phase=self._phase_from_change(item.change_pct),
+                    strength_score=self._strength_from_change(item.change_pct),
+                    reason="industry/concept ranking gain",
+                )
+            )
+        return active
+
+    @staticmethod
+    def _phase_from_change(value: Optional[float]) -> str:
+        if value is None:
+            return "unknown"
+        if value >= 3:
+            return "accelerating"
+        if value > 0:
+            return "warming"
+        return "cooling"
+
+    @staticmethod
+    def _strength_from_change(value: Optional[float]) -> Optional[int]:
+        if value is None:
+            return None
+        return max(0, min(100, int(round(50 + value * 8))))
+
+    @staticmethod
+    def _format_trade_date(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, date):
+            return value.isoformat()
+        text = str(value).strip()
+        return text or None
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            if isinstance(value, str):
+                text = value.strip()
+                if not text:
+                    return None
+                if text.endswith("%"):
+                    text = text[:-1].strip()
+                return float(text)
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _safe_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _optional_text(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None

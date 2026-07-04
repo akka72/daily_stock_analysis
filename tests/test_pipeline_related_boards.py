@@ -10,7 +10,10 @@ from unittest.mock import MagicMock
 from api.v1.schemas.history import ReportDetails
 from data_provider.base import DataFetcherManager
 from src.core.pipeline import StockAnalysisPipeline
-from src.utils.data_processing import extract_board_detail_fields
+from src.utils.data_processing import (
+    extract_board_detail_fields,
+    extract_market_structure_detail_field,
+)
 
 
 class _SlowConceptRankingFetcher:
@@ -144,6 +147,36 @@ class PipelineRelatedBoardsTestCase(unittest.TestCase):
         self.assertEqual(extracted["concept_rankings"]["top"][0]["change_pct"], 4.2)
         self.assertEqual(extracted["concept_rankings"]["top"][0]["source"], "akshare")
         self.assertEqual(details.concept_rankings["top"][0]["name"], "机器人概念")
+
+    def test_extract_market_structure_details_from_enhanced_context(self) -> None:
+        snapshot = {
+            "enhanced_context": {
+                "market_structure_context": {
+                    "schema_version": "market-structure-v1",
+                    "status": "partial",
+                    "market": "cn",
+                    "market_theme_context": {
+                        "schema_version": "market-theme-v1",
+                        "status": "partial",
+                        "market": "cn",
+                        "active_themes": [{"name": "机器人概念"}],
+                    },
+                    "stock_market_position": {
+                        "schema_version": "stock-market-position-v1",
+                        "status": "partial",
+                        "stock_code": "300024",
+                        "market": "cn",
+                        "primary_theme": {"name": "机器人概念"},
+                    },
+                }
+            }
+        }
+
+        extracted = extract_market_structure_detail_field(snapshot)
+        details = ReportDetails(context_snapshot=snapshot)
+
+        self.assertEqual(extracted["stock_market_position"]["primary_theme"]["name"], "机器人概念")
+        self.assertEqual(details.market_structure["market_theme_context"]["active_themes"][0]["name"], "机器人概念")
 
     def test_attach_belong_boards_copies_existing_board_list(self) -> None:
         pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)

@@ -1,0 +1,147 @@
+# -*- coding: utf-8 -*-
+"""Market structure service regression tests."""
+
+from __future__ import annotations
+
+from src.services.market_hotspot_service import MarketHotspotService
+from src.services.market_structure_service import MarketStructureService
+
+
+class _FakeFetcherManager:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.sector_calls = 0
+        self.concept_calls = 0
+
+    def get_sector_rankings(self, n: int = 5):
+        self.sector_calls += 1
+        if self.fail:
+            raise RuntimeError("sector down")
+        return (
+            [{"name": "通用设备", "change_pct": 2.1}],
+            [{"name": "旅游酒店", "change_pct": -1.8}],
+        )
+
+    def get_concept_rankings(self, n: int = 5):
+        self.concept_calls += 1
+        if self.fail:
+            raise RuntimeError("concept down")
+        return (
+            [{"name": "机器人概念", "change_pct": 4.2}],
+            [{"name": "转基因", "change_pct": -2.0}],
+        )
+
+
+def test_market_hotspot_service_builds_theme_context_from_dsa_rankings() -> None:
+    service = MarketHotspotService(fetcher_manager=_FakeFetcherManager())
+
+    context = service.get_hotspots(market="cn", trade_date="2026-07-04")
+
+    assert context["schema_version"] == "market-theme-v1"
+    assert context["status"] == "ok"
+    assert context["active_themes"][0]["name"] == "机器人概念"
+    assert context["leading_concepts"][0]["change_pct"] == 4.2
+    assert context["theme_breadth"]["leading_concept_count"] == 1
+
+
+def test_market_hotspot_service_caches_rankings_per_instance() -> None:
+    fetcher = _FakeFetcherManager()
+    service = MarketHotspotService(fetcher_manager=fetcher)
+
+    first = service.get_hotspots(market="cn", trade_date="2026-07-04")
+    second = service.get_hotspots(market="cn", trade_date="2026-07-04")
+
+    assert first == second
+    assert fetcher.sector_calls == 1
+    assert fetcher.concept_calls == 1
+
+
+def test_market_hotspot_service_fails_open_when_rankings_unavailable() -> None:
+    service = MarketHotspotService(fetcher_manager=_FakeFetcherManager(fail=True))
+
+    context = service.get_hotspots(market="cn", trade_date="2026-07-04")
+
+    assert context["status"] == "unknown"
+    assert context["data_quality"]["errors"]
+    assert "industry_rankings" in context["data_quality"]["missing_fields"]
+    assert "concept_rankings" in context["data_quality"]["missing_fields"]
+
+
+def test_market_structure_service_combines_market_and_stock_layers() -> None:
+    service = MarketStructureService(fetcher_manager=_FakeFetcherManager())
+    fundamental_context = {
+        "market": "cn",
+        "belong_boards": [{"name": "机器人概念", "type": "概念"}],
+        "concept_boards": {
+            "status": "ok",
+            "data": {
+                "top": [{"name": "机器人概念", "change_pct": 4.2}],
+                "bottom": [],
+            },
+        },
+        "boards": {
+            "status": "ok",
+            "data": {
+                "top": [{"name": "通用设备", "change_pct": 2.1}],
+                "bottom": [],
+            },
+        },
+    }
+
+    context = service.build_context(
+        code="300024",
+        stock_name="机器人",
+        market="cn",
+        fundamental_context=fundamental_context,
+        trade_date="2026-07-04",
+    )
+
+    assert context["schema_version"] == "market-structure-v1"
+    assert context["market_theme_context"]["active_themes"][0]["name"] == "机器人概念"
+    position = context["stock_market_position"]
+    assert position["primary_theme"]["name"] == "机器人概念"
+    assert position["theme_phase"] == "accelerating"
+    assert position["stock_role"] == "follower"
+    assert "leader_stocks" in position["missing_fields"]
+
+
+def test_market_structure_service_keeps_stock_layer_partial_without_ranking_evidence() -> None:
+    service = MarketStructureService(fetcher_manager=_FakeFetcherManager())
+    fundamental_context = {
+        "market": "cn",
+        "belong_boards": [{"name": "未上榜概念", "type": "概念"}],
+        "concept_boards": {
+            "status": "ok",
+            "data": {"top": [{"name": "机器人概念", "change_pct": 4.2}], "bottom": []},
+        },
+    }
+
+    context = service.build_context(
+        code="300024",
+        stock_name="机器人",
+        market="cn",
+        fundamental_context=fundamental_context,
+        trade_date="2026-07-04",
+    )
+
+    position = context["stock_market_position"]
+    assert position["status"] == "partial"
+    assert position["primary_theme"]["name"] == "未上榜概念"
+    assert position["theme_phase"] == "unknown"
+    assert "theme_ranking_match" in position["missing_fields"]
+    assert {tag["code"] for tag in position["risk_tags"]} == {"stock_theme_evidence_partial"}
+
+
+def test_market_structure_service_returns_not_supported_for_non_cn() -> None:
+    service = MarketStructureService(fetcher_manager=_FakeFetcherManager())
+
+    context = service.build_context(
+        code="AAPL",
+        stock_name="Apple",
+        market="us",
+        fundamental_context={"market": "us", "belong_boards": [{"name": "Technology"}]},
+    )
+
+    assert context["status"] == "not_supported"
+    assert context["market_theme_context"]["status"] == "not_supported"
+    assert context["stock_market_position"]["status"] == "not_supported"

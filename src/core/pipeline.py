@@ -63,6 +63,7 @@ from src.services.analysis_context_builder import (
     AnalysisContextBuilder,
     PipelineAnalysisArtifacts,
 )
+from src.services.market_structure_service import MarketStructureService
 from src.services.run_diagnostics import (
     activate_run_diagnostic_context,
     current_diagnostic_snapshot,
@@ -222,6 +223,7 @@ class StockAnalysisPipeline:
         self.trend_analyzer = StockTrendAnalyzer()  # 技术分析器
         self.analyzer = GeminiAnalyzer(config=self.config, skills=self.analysis_skills)
         self.notifier = NotificationService(source_message=source_message)
+        self.market_structure_service = MarketStructureService(fetcher_manager=self.fetcher_manager)
         self._single_stock_notify_lock = threading.Lock()
         self._daily_market_context_service_lock = threading.Lock()
         self._concept_rankings_cache_lock = threading.Lock()
@@ -495,6 +497,14 @@ class StockAnalysisPipeline:
                 code,
                 fundamental_context,
             )
+            market_structure_context = self._build_market_structure_context(
+                code=code,
+                stock_name=stock_name,
+                market=market,
+                fundamental_context=fundamental_context,
+                trade_date=daily_market_target_date,
+                market_phase_summary=market_phase_summary,
+            )
 
             # P0: write-only snapshot, fail-open, no read dependency on this table.
             try:
@@ -544,6 +554,7 @@ class StockAnalysisPipeline:
                     market_phase_summary=market_phase_summary,
                     daily_market_context=daily_market_context,
                     portfolio_context=portfolio_context,
+                    market_structure_context=market_structure_context,
                 )
 
             # Step 4: 多维度情报搜索（最新消息+风险排查+业绩预期）
@@ -650,6 +661,8 @@ class StockAnalysisPipeline:
             )
             if portfolio_context is not None:
                 enhanced_context["portfolio_context"] = dict(portfolio_context)
+            if isinstance(market_structure_context, dict):
+                enhanced_context["market_structure_context"] = market_structure_context
             
             # Step 7: 调用 AI 分析（传入增强的上下文和新闻）
             (
@@ -770,6 +783,8 @@ class StockAnalysisPipeline:
                     )
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
+                if isinstance(market_structure_context, dict):
+                    result.market_structure_context = market_structure_context
                 result.market_phase_summary = market_phase_summary
                 result.analysis_context_pack_overview = analysis_context_pack_overview
                 self._refresh_decision_action_for_final_result(
@@ -1172,6 +1187,43 @@ class StockAnalysisPipeline:
             cache[market] = (top_concepts, bottom_concepts)
             return list(top_concepts), list(bottom_concepts)
 
+    def _build_market_structure_context(
+        self,
+        *,
+        code: str,
+        stock_name: str,
+        market: str,
+        fundamental_context: Optional[Dict[str, Any]],
+        trade_date: Any = None,
+        market_phase_summary: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Build market structure context without blocking the main analysis."""
+        service = getattr(self, "market_structure_service", None)
+        if service is None:
+            try:
+                service = MarketStructureService(fetcher_manager=self.fetcher_manager)
+                self.market_structure_service = service
+            except Exception as exc:
+                logger.debug("market structure service init failed (fail-open): %s", exc)
+                return None
+        try:
+            return service.build_context(
+                code=code,
+                stock_name=stock_name,
+                market=market,
+                fundamental_context=fundamental_context,
+                trade_date=trade_date,
+                market_phase_summary=market_phase_summary,
+            )
+        except Exception as exc:
+            logger.debug(
+                "%s market structure context build failed (fail-open): %s",
+                code,
+                exc,
+                exc_info=True,
+            )
+            return None
+
     def _ensure_agent_history(self, code: str, min_days: int = 240) -> None:
         """Ensure at least *min_days* of K-line history is in DB for agent tools."""
         from src.services.history_loader import get_frozen_target_date
@@ -1207,6 +1259,7 @@ class StockAnalysisPipeline:
         market_phase_summary: Optional[Dict[str, Any]] = None,
         daily_market_context: Optional[DailyMarketContext] = None,
         portfolio_context: Optional[Dict[str, Any]] = None,
+        market_structure_context: Optional[Dict[str, Any]] = None,
     ) -> Optional[AnalysisResult]:
         """
         使用 Agent 模式分析单只股票。
@@ -1237,6 +1290,8 @@ class StockAnalysisPipeline:
                 initial_context["skills"] = self.analysis_skills
             if market_phase_context is not None:
                 initial_context["market_phase_context"] = market_phase_context
+            if isinstance(market_structure_context, dict):
+                initial_context["market_structure_context"] = market_structure_context
             self._attach_daily_market_context(
                 initial_context,
                 daily_market_context,
@@ -1407,6 +1462,8 @@ class StockAnalysisPipeline:
                     )
                 if isinstance(fundamental_context, dict):
                     result.fundamental_context = fundamental_context
+                if isinstance(market_structure_context, dict):
+                    result.market_structure_context = market_structure_context
                 result.market_phase_summary = market_phase_summary
                 result.analysis_context_pack_overview = analysis_context_pack_overview
                 self._refresh_decision_action_for_final_result(
@@ -2341,6 +2398,9 @@ class StockAnalysisPipeline:
             "realtime_quote_raw": self._safe_to_dict(realtime_quote),
             "chip_distribution_raw": self._safe_to_dict(chip_data),
         }
+        market_structure_context = enhanced_context.get("market_structure_context")
+        if isinstance(market_structure_context, dict):
+            snapshot["market_structure_context"] = market_structure_context
         if news_content is not None:
             snapshot["news_retrieval_content"] = news_content
         if news_result_count is not None:

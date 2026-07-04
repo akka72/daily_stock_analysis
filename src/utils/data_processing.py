@@ -294,6 +294,31 @@ def extract_board_detail_fields(
     }
 
 
+def extract_market_structure_detail_field(context_snapshot: Any) -> Optional[Dict[str, Any]]:
+    """Extract the stable market_structure detail payload from a snapshot."""
+    snapshot_obj = parse_json_field(context_snapshot)
+    if not isinstance(snapshot_obj, dict):
+        return None
+
+    candidates = [snapshot_obj.get("market_structure_context")]
+    enhanced = snapshot_obj.get("enhanced_context")
+    if isinstance(enhanced, dict):
+        candidates.append(enhanced.get("market_structure_context"))
+
+    for candidate in candidates:
+        payload = parse_json_field(candidate)
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("schema_version") != "market-structure-v1":
+            continue
+        if not isinstance(payload.get("market_theme_context"), dict):
+            continue
+        if not isinstance(payload.get("stock_market_position"), dict):
+            continue
+        return payload
+    return None
+
+
 def normalize_signal_attribution_values(signal_attr: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Normalize signal_attribution values in-place.
