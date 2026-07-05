@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 import threading
 import time
 
@@ -366,6 +367,47 @@ def test_market_hotspot_service_retries_after_ranking_timeout_cooldown() -> None
     assert recovered["leading_industries"][0]["name"] == "通用设备"
     assert fetcher.sector_calls == 2
     assert fetcher.concept_calls == 2
+
+
+def test_market_hotspot_service_drops_stale_timeout_future_before_retry() -> None:
+    fetcher = _FakeFetcherManager()
+    service = MarketHotspotService(
+        fetcher_manager=fetcher,
+        ranking_fetch_timeout_seconds=0.01,
+        failure_cache_ttl_seconds=0.0,
+    )
+    stale_future: Future = Future()
+    inflight_key = (type(fetcher), "get_sector_rankings", 5)
+    stale_future.add_done_callback(
+        lambda done_future: MarketHotspotService._forget_ranking_fetch(
+            inflight_key, done_future
+        )
+    )
+
+    with MarketHotspotService._ranking_fetch_futures_lock:
+        acquired = MarketHotspotService._ranking_fetch_slots.acquire(blocking=False)
+        assert acquired
+        MarketHotspotService._ranking_fetch_futures[inflight_key] = stale_future
+        MarketHotspotService._ranking_fetch_retry_after[inflight_key] = (
+            stale_future,
+            time.monotonic() - 0.01,
+        )
+
+    try:
+        context = service.get_hotspots(market="cn", trade_date="2026-07-04")
+    finally:
+        if not stale_future.done():
+            stale_future.set_result(None)
+        _wait_for_market_hotspot_workers_to_drain()
+
+    assert context["status"] == "ok"
+    assert fetcher.sector_calls == 1
+    assert fetcher.concept_calls == 1
+    with MarketHotspotService._ranking_fetch_futures_lock:
+        assert (
+            MarketHotspotService._ranking_fetch_futures.get(inflight_key)
+            is not stale_future
+        )
 
 
 def test_market_hotspot_service_keeps_permanent_timeouts_under_worker_cap() -> None:

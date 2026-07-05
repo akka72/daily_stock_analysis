@@ -428,12 +428,18 @@ class MarketHotspotService:
             retry_entry = cls._ranking_fetch_retry_after.get(inflight_key)
             now = time.monotonic()
             if retry_entry is not None:
-                _, retry_after = retry_entry
+                retry_future, retry_after = retry_entry
                 if retry_after > now:
                     raise TimeoutError(
                         f"{task_name} ranking fetch cooling down after previous timeout"
                     )
                 cls._ranking_fetch_retry_after.pop(inflight_key, None)
+                if cls._ranking_fetch_futures.get(inflight_key) is retry_future:
+                    cls._ranking_fetch_futures.pop(inflight_key, None)
+                    if retry_future.done() or retry_future.cancelled():
+                        cls._ranking_fetch_slots.release()
+                    else:
+                        cls._ranking_fetch_detached_futures.add(retry_future)
 
             current = cls._ranking_fetch_futures.get(inflight_key)
             if current is not None:
