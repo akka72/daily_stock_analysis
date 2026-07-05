@@ -72,7 +72,6 @@ const TEXT = {
     warnings: '告警',
     missingReasons: '缺失原因',
     diagnosticCodes: '诊断码',
-    actionHint: '处理建议',
     inputScope: '本次分析输入',
     evidenceScope: '仅代表进入本次 LLM 的输入，不等同于数据源运行成功',
     qualityScore: '质量分',
@@ -95,17 +94,6 @@ const TEXT = {
       partial: '部分可用',
       fetch_failed: '抓取失败',
     },
-    guidance: {
-      newsMissingWithResults: '上方相关资讯可能来自报告页补充检索或历史持久化；本次 LLM 输入没有使用新闻上下文。若需要新闻参与分析，请检查搜索服务配置、网络或接口限流后重新分析。',
-      newsMissing: '本次没有可用新闻上下文进入 LLM。请检查搜索服务配置、网络或接口限流，也可以稍后重新分析。',
-      missing: '该数据块没有进入本次 LLM 输入。请检查对应数据源配置、网络或接口限流后重新分析。',
-      fetch_failed: '数据源抓取失败。请检查对应 provider 配置、网络和接口限流后重新分析。',
-      partial: '只有部分字段进入本次 LLM 输入，结论需要结合其他数据块复核。',
-      fallback: '本次使用降级数据源，结论可靠性可能低于主数据源。',
-      stale: '本次使用过期数据，建议等数据源更新后重新分析。',
-      estimated: '本次包含估算字段，盘中结论建议结合实时行情复核。',
-      not_supported: '当前市场或标的不支持该数据块，通常无需处理。',
-    },
   },
   en: {
     eyebrow: 'DATA CONTEXT',
@@ -116,7 +104,6 @@ const TEXT = {
     warnings: 'Warnings',
     missingReasons: 'Missing Reasons',
     diagnosticCodes: 'Diagnostic Codes',
-    actionHint: 'Suggested Action',
     inputScope: 'Analysis Input',
     evidenceScope: 'Shows inputs included in this LLM run, not provider run success',
     qualityScore: 'Quality',
@@ -139,17 +126,6 @@ const TEXT = {
       partial: 'Partial',
       fetch_failed: 'Fetch failed',
     },
-    guidance: {
-      newsMissingWithResults: 'Related news above may come from supplemental report-page retrieval or persisted history; this LLM run did not use news context. To include news in analysis, check search configuration, network, or rate limits and reanalyze.',
-      newsMissing: 'No usable news context entered this LLM run. Check search configuration, network, or rate limits, or reanalyze later.',
-      missing: 'This block was not included in this LLM run. Check the matching data source configuration, network, or rate limits and reanalyze.',
-      fetch_failed: 'The data source fetch failed. Check provider configuration, network, and rate limits before reanalyzing.',
-      partial: 'Only part of this block entered the LLM input. Cross-check the conclusion with other data blocks.',
-      fallback: 'A fallback data source was used, so confidence may be lower than with the primary source.',
-      stale: 'Stale data was used. Reanalyze after the data source updates.',
-      estimated: 'Estimated fields were included. Cross-check intraday conclusions against real-time quotes.',
-      not_supported: 'This market or symbol does not support this block; usually no action is required.',
-    },
   },
   ko: {
     eyebrow: '데이터 컨텍스트',
@@ -160,7 +136,6 @@ const TEXT = {
     warnings: '경고',
     missingReasons: '누락 사유',
     diagnosticCodes: '진단 코드',
-    actionHint: '권장 조치',
     inputScope: '이번 분석 입력',
     evidenceScope: '이번 LLM 입력에 포함된 항목만 표시하며, 데이터 소스 실행 성공과는 다릅니다',
     qualityScore: '품질 점수',
@@ -183,51 +158,49 @@ const TEXT = {
       partial: '부분 사용',
       fetch_failed: '수집 실패',
     },
-    guidance: {
-      newsMissingWithResults: '위 관련 뉴스는 리포트 페이지 보충 검색 또는 저장된 이력에서 온 것일 수 있으며, 이번 LLM 입력에는 뉴스 컨텍스트가 포함되지 않았습니다. 뉴스까지 분석에 반영하려면 검색 설정, 네트워크, 제한 상태를 확인한 뒤 다시 분석하세요.',
-      newsMissing: '이번 LLM 입력에 사용할 뉴스 컨텍스트가 없습니다. 검색 설정, 네트워크, 제한 상태를 확인하거나 잠시 후 다시 분석하세요.',
-      missing: '이 데이터 블록은 이번 LLM 입력에 포함되지 않았습니다. 해당 데이터 소스 설정, 네트워크, 제한 상태를 확인한 뒤 다시 분석하세요.',
-      fetch_failed: '데이터 소스 수집에 실패했습니다. provider 설정, 네트워크, 제한 상태를 확인한 뒤 다시 분석하세요.',
-      partial: '일부 필드만 이번 LLM 입력에 포함되었습니다. 다른 데이터 블록과 함께 결론을 확인하세요.',
-      fallback: '대체 데이터 소스를 사용했습니다. 기본 데이터 소스보다 신뢰도가 낮을 수 있습니다.',
-      stale: '만료된 데이터를 사용했습니다. 데이터 소스가 갱신된 뒤 다시 분석하는 것을 권장합니다.',
-      estimated: '추정 필드가 포함되었습니다. 장중 결론은 실시간 시세와 함께 확인하세요.',
-      not_supported: '현재 시장 또는 종목은 이 데이터 블록을 지원하지 않으며, 보통 별도 조치가 필요하지 않습니다.',
-    },
   },
 } as const;
 
 const MISSING_REASON_LABELS: Record<ReportLanguage, Record<string, string>> = {
   zh: {
-    daily_bars_missing: '未进入分析输入',
-    news_context_missing: '未进入分析输入',
-    realtime_quote_missing: '未进入分析输入',
-    trend_result_missing: '未进入分析输入',
-    fundamental_context_missing: '未进入分析输入',
-    chip_distribution_missing: '未进入分析输入',
-    today_missing: '今日数据未进入分析输入',
-    yesterday_missing: '昨日数据未进入分析输入',
+    daily_bars_missing: '日线未进入本次分析输入；请检查日线数据源配置、网络或接口限流后重新分析。',
+    news_context_missing: '新闻未进入本次分析输入；请检查搜索服务配置、网络或接口限流，也可以稍后重新分析。',
+    realtime_quote_missing: '实时行情未进入本次分析输入；请检查行情数据源配置、网络或接口限流后重新分析。',
+    trend_result_missing: '技术分析结果未进入本次分析输入；请检查日线数据完整性后重新分析。',
+    fundamental_context_missing: '基本面未进入本次分析输入；请检查基本面数据源配置、网络或接口限流后重新分析。',
+    fundamental_pipeline_failed: '基本面抓取失败；请检查对应 provider 配置、网络或接口限流后重新分析。',
+    chip_distribution_missing: '筹码数据未进入本次分析输入；请检查筹码数据源是否支持该市场或标的，或稍后重新分析。',
+    today_missing: '今日数据未进入本次分析输入；盘中结论建议结合实时行情复核后重新分析。',
+    yesterday_missing: '昨日数据未进入本次分析输入；请检查日线数据源是否更新后重新分析。',
   },
   en: {
-    daily_bars_missing: 'Not included in analysis input',
-    news_context_missing: 'Not included in analysis input',
-    realtime_quote_missing: 'Not included in analysis input',
-    trend_result_missing: 'Not included in analysis input',
-    fundamental_context_missing: 'Not included in analysis input',
-    chip_distribution_missing: 'Not included in analysis input',
-    today_missing: 'Today data not included in analysis input',
-    yesterday_missing: 'Yesterday data not included in analysis input',
+    daily_bars_missing: 'Daily bars were not included in this LLM input; check the daily data source configuration, network, or rate limits and reanalyze.',
+    news_context_missing: 'News was not included in this LLM input; check search configuration, network, or rate limits, or reanalyze later.',
+    realtime_quote_missing: 'Real-time quote was not included in this LLM input; check the quote data source configuration, network, or rate limits and reanalyze.',
+    trend_result_missing: 'Technical analysis result was not included in this LLM input; check daily bar completeness and reanalyze.',
+    fundamental_context_missing: 'Fundamentals were not included in this LLM input; check fundamental data source configuration, network, or rate limits and reanalyze.',
+    fundamental_pipeline_failed: 'Fundamental fetch failed; check the provider configuration, network, or rate limits and reanalyze.',
+    chip_distribution_missing: 'Chip distribution was not included in this LLM input; check whether the chip data source supports this market or symbol, or reanalyze later.',
+    today_missing: 'Today data was not included in this LLM input; cross-check intraday conclusions with real-time quotes and reanalyze.',
+    yesterday_missing: 'Yesterday data was not included in this LLM input; check whether the daily data source has updated and reanalyze.',
   },
   ko: {
-    daily_bars_missing: '분석 입력에 포함되지 않음',
-    news_context_missing: '분석 입력에 포함되지 않음',
-    realtime_quote_missing: '분석 입력에 포함되지 않음',
-    trend_result_missing: '분석 입력에 포함되지 않음',
-    fundamental_context_missing: '분석 입력에 포함되지 않음',
-    chip_distribution_missing: '분석 입력에 포함되지 않음',
-    today_missing: '당일 데이터가 분석 입력에 포함되지 않음',
-    yesterday_missing: '전일 데이터가 분석 입력에 포함되지 않음',
+    daily_bars_missing: '일봉이 이번 LLM 입력에 포함되지 않았습니다. 일봉 데이터 소스 설정, 네트워크 또는 제한 상태를 확인한 뒤 다시 분석하세요.',
+    news_context_missing: '뉴스가 이번 LLM 입력에 포함되지 않았습니다. 검색 설정, 네트워크 또는 제한 상태를 확인하거나 잠시 후 다시 분석하세요.',
+    realtime_quote_missing: '실시간 시세가 이번 LLM 입력에 포함되지 않았습니다. 시세 데이터 소스 설정, 네트워크 또는 제한 상태를 확인한 뒤 다시 분석하세요.',
+    trend_result_missing: '기술 분석 결과가 이번 LLM 입력에 포함되지 않았습니다. 일봉 데이터 완전성을 확인한 뒤 다시 분석하세요.',
+    fundamental_context_missing: '펀더멘털이 이번 LLM 입력에 포함되지 않았습니다. 펀더멘털 데이터 소스 설정, 네트워크 또는 제한 상태를 확인한 뒤 다시 분석하세요.',
+    fundamental_pipeline_failed: '펀더멘털 수집에 실패했습니다. provider 설정, 네트워크 또는 제한 상태를 확인한 뒤 다시 분석하세요.',
+    chip_distribution_missing: '매물대 데이터가 이번 LLM 입력에 포함되지 않았습니다. 해당 시장 또는 종목을 데이터 소스가 지원하는지 확인하거나 잠시 후 다시 분석하세요.',
+    today_missing: '당일 데이터가 이번 LLM 입력에 포함되지 않았습니다. 장중 결론은 실시간 시세와 함께 확인한 뒤 다시 분석하세요.',
+    yesterday_missing: '전일 데이터가 이번 LLM 입력에 포함되지 않았습니다. 일봉 데이터 소스가 갱신되었는지 확인한 뒤 다시 분석하세요.',
   },
+};
+
+const NEWS_MISSING_WITH_RESULTS_LABELS: Record<ReportLanguage, string> = {
+  zh: '新闻未进入本次分析输入；上方相关资讯通常来自报告页补充检索或历史持久化，不代表新闻已参与本次 LLM 分析。若需要新闻参与分析，请检查搜索服务配置、网络或接口限流后重新分析。',
+  en: 'News was not included in this LLM input; related news above usually comes from supplemental report-page retrieval or persisted history, and does not mean news participated in this LLM analysis. To include news, check search configuration, network, or rate limits and reanalyze.',
+  ko: '뉴스가 이번 LLM 입력에 포함되지 않았습니다. 위 관련 뉴스는 보통 리포트 페이지 보충 검색 또는 저장된 이력에서 온 것이며, 이번 LLM 분석에 뉴스가 반영되었다는 뜻은 아닙니다. 뉴스까지 반영하려면 검색 설정, 네트워크 또는 제한 상태를 확인한 뒤 다시 분석하세요.',
 };
 
 const UNKNOWN_MISSING_REASON_LABELS: Record<ReportLanguage, string> = {
@@ -281,35 +254,17 @@ const formatLimitation = (
   return language === 'zh' ? `${label}：${statusLabel}` : `${label}: ${statusLabel}`;
 };
 
-const formatMissingReason = (reason: string, language: ReportLanguage): string => {
-  const label = MISSING_REASON_LABELS[language][reason];
-  return label || UNKNOWN_MISSING_REASON_LABELS[language];
-};
-
-const guidanceClassName = (status: AnalysisContextPackBlockStatus): string => {
-  if (status === 'missing' || status === 'fetch_failed') {
-    return 'border-danger/25 bg-danger/10 text-danger';
-  }
-  if (status === 'not_supported') {
-    return 'border-border/60 bg-muted/20 text-muted-text';
-  }
-  return 'border-warning/25 bg-warning/10 text-warning';
-};
-
-const getBlockGuidance = (
+const formatMissingReason = (
+  reason: string,
   block: AnalysisContextPackOverview['blocks'][number],
   overview: AnalysisContextPackOverview,
-  text: (typeof TEXT)[ReportLanguage],
-): string | null => {
-  if (block.status === 'available') {
-    return null;
+  language: ReportLanguage,
+): string => {
+  if (reason === 'news_context_missing' && block.key === 'news' && (overview.metadata?.newsResultCount || 0) > 0) {
+    return NEWS_MISSING_WITH_RESULTS_LABELS[language];
   }
-  if (block.key === 'news' && block.status === 'missing') {
-    return (overview.metadata?.newsResultCount || 0) > 0
-      ? text.guidance.newsMissingWithResults
-      : text.guidance.newsMissing;
-  }
-  return text.guidance[block.status] || null;
+  const label = MISSING_REASON_LABELS[language][reason];
+  return label || UNKNOWN_MISSING_REASON_LABELS[language];
 };
 
 export const AnalysisContextSummary: React.FC<AnalysisContextSummaryProps> = ({
@@ -447,7 +402,6 @@ export const AnalysisContextSummary: React.FC<AnalysisContextSummaryProps> = ({
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             {overview.blocks.map((block) => {
               const style = STATUS_STYLE[block.status] || STATUS_STYLE.missing;
-              const guidance = getBlockGuidance(block, overview, text);
               return (
                 <div key={block.key} className="home-subpanel p-3">
                   <div className="flex items-start justify-between gap-3">
@@ -477,19 +431,13 @@ export const AnalysisContextSummary: React.FC<AnalysisContextSummaryProps> = ({
                   {block.missingReasons?.length ? (
                     <p className="mt-2 text-xs leading-5 text-muted-text">
                       {text.missingReasons}: {block.missingReasons
-                        .map((reason) => formatMissingReason(reason, reportLanguage))
+                        .map((reason) => formatMissingReason(reason, block, overview, reportLanguage))
                         .join(', ')}
                     </p>
                   ) : null}
                   {block.missingReasons?.length ? (
                     <p className="mt-1 text-[11px] leading-5 text-muted-text">
                       {text.diagnosticCodes}: {block.missingReasons.join(', ')}
-                    </p>
-                  ) : null}
-                  {guidance ? (
-                    <p className={`mt-2 rounded-lg border px-3 py-2 text-xs leading-5 ${guidanceClassName(block.status)}`}>
-                      <span className="font-medium">{text.actionHint}: </span>
-                      {guidance}
                     </p>
                   ) : null}
                 </div>
