@@ -5,10 +5,17 @@ import pytest
 
 from src.schemas.decision_action import (
     build_action_fields,
+    display_decision_type_for_result,
+    display_operation_advice,
     localize_action_label,
     normalize_decision_action,
 )
-from src.schemas.decision_scale import action_for_score, decision_type_for_score, signal_key_for_score
+from src.schemas.decision_scale import (
+    action_for_score,
+    decision_type_for_score,
+    extract_decision_guardrail_reason,
+    signal_key_for_score,
+)
 
 
 @pytest.mark.parametrize(
@@ -366,3 +373,54 @@ def test_build_action_fields_keeps_neutral_score_conflict_when_guardrail_is_expl
         guardrail_reason="等待回踩确认",
         align_with_score=True,
     ) == {"action": "watch", "action_label": "观望"}
+
+
+def test_display_operation_advice_aligns_with_score_without_guardrail() -> None:
+    assert display_operation_advice(
+        operation_advice="持有",
+        sentiment_score=72,
+        report_language="zh",
+    ) == "买入"
+
+
+def test_display_operation_advice_keeps_guardrailed_neutral_advice() -> None:
+    assert display_operation_advice(
+        operation_advice="持有",
+        sentiment_score=72,
+        guardrail_reason="等待回踩确认",
+        report_language="zh",
+    ) == "持有"
+
+
+def test_display_decision_type_for_result_uses_display_action_bucket() -> None:
+    class Result:
+        operation_advice = "持有"
+        sentiment_score = 72
+        report_language = "zh"
+        action = None
+        action_label = None
+        dashboard = None
+
+    assert display_decision_type_for_result(Result()) == "buy"
+
+
+def test_extract_decision_guardrail_reason_reads_dashboard_sources() -> None:
+    assert extract_decision_guardrail_reason(
+        {
+            "dashboard": {
+                "decision_score_calibration": {
+                    "guardrail_reason": "wait for support confirmation",
+                }
+            }
+        }
+    ) == "wait for support confirmation"
+
+    assert extract_decision_guardrail_reason(
+        {
+            "dashboard": {
+                "decision_stability": {
+                    "reason": "capital flow is unavailable",
+                }
+            }
+        }
+    ) == "capital flow is unavailable"

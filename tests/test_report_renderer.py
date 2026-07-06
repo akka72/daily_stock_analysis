@@ -79,7 +79,22 @@ class TestReportRenderer(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertIn("决策仪表盘", out)
         self.assertIn("贵州茅台", out)
-        self.assertIn("持有", out)
+        self.assertIn("🟢买入:1 🟡观望:0 🔴卖出:0", out)
+        self.assertIn("买入 | 评分 72", out)
+
+    def test_render_markdown_summary_keeps_guardrailed_hold(self) -> None:
+        r = _make_result(
+            dashboard={
+                "decision_stability": {"reason": "等待支撑确认"},
+            }
+        )
+
+        out = render("markdown", [r], summary_only=True)
+
+        self.assertIsNotNone(out)
+        self.assertIn("🟢买入:0 🟡观望:1 🔴卖出:0", out)
+        self.assertIn("持有 | 评分 72", out)
+        self.assertNotIn("买入 | 评分 72", out)
 
     def test_render_markdown_full(self) -> None:
         """Markdown platform renders full report."""

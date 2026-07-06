@@ -26,7 +26,6 @@ from src.report_language import (
     is_chip_structure_unavailable,
     localize_bias_status,
     localize_chip_health,
-    localize_operation_advice,
     localize_trend_prediction,
     normalize_report_language,
 )
@@ -36,7 +35,7 @@ from src.market_phase_summary import (
     extract_market_phase_summary,
     rebuild_market_phase_summary_for_stock_code,
 )
-from src.schemas.decision_action import build_action_fields
+from src.schemas.decision_action import build_action_fields, display_operation_advice_for_result
 from src.utils.sniper_points import find_sniper_points
 from src.utils.data_processing import (
     extract_realtime_detail_fields,
@@ -988,7 +987,7 @@ class HistoryService:
             report_lines.extend([
                 f"| {labels['position_status_label']} | {labels['action_advice_label']} |",
                 "|---------|---------|",
-                f"| 🆕 **{labels['no_position_label']}** | {pos_advice.get('no_position', localize_operation_advice(result.operation_advice, report_language))} |",
+                f"| 🆕 **{labels['no_position_label']}** | {pos_advice.get('no_position', self._get_display_operation_advice(result, report_language))} |",
                 f"| 💼 **{labels['has_position_label']}** | {pos_advice.get('has_position', labels['continue_holding'])} |",
                 "",
             ])
@@ -1204,12 +1203,23 @@ class HistoryService:
             return "N/A"
         return text
 
+    def _get_display_operation_advice(
+        self,
+        result: AnalysisResult,
+        report_language: Optional[str] = None,
+    ) -> str:
+        return display_operation_advice_for_result(
+            result,
+            report_language=report_language or getattr(result, "report_language", "zh"),
+        )
+
     def _get_signal_level(self, result: AnalysisResult) -> Tuple[str, str, str]:
         """Get signal level based on sentiment score and decision type."""
+        report_language = getattr(result, "report_language", "zh")
         return get_signal_level(
-            result.operation_advice,
+            self._get_display_operation_advice(result, report_language),
             result.sentiment_score,
-            getattr(result, "report_language", "zh"),
+            report_language,
         )
 
     @staticmethod

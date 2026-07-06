@@ -71,7 +71,7 @@
 {% if pos_advice %}
 | {{ labels.position_status_label }} | {{ labels.action_advice_label }} |
 |---------|---------|
-| 🆕 **{{ labels.no_position_label }}** | {{ pos_advice.get('no_position', localize_operation_advice(result.operation_advice, report_language)) }} |
+| 🆕 **{{ labels.no_position_label }}** | {{ pos_advice.get('no_position', e.localized_operation_advice) }} |
 | 💼 **{{ labels.has_position_label }}** | {{ pos_advice.get('has_position', labels.continue_holding) }} |
 {% endif %}
 

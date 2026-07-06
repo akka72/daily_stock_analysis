@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 
 CANONICAL_DECISION_SCALE_VERSION = "decision-scale-v1"
@@ -96,6 +96,44 @@ def score_band_metadata(value: Any) -> dict[str, Any]:
         "canonical_action": band.action,
         "canonical_decision_type": band.decision_type,
     }
+
+
+def _text_or_none(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def extract_decision_guardrail_reason(payload: Any) -> Optional[str]:
+    """Return the first explicit score/action guardrail reason in a report payload."""
+
+    data = _mapping_or_empty(payload)
+    dashboard = _mapping_or_empty(data.get("dashboard"))
+    calibration = _mapping_or_empty(dashboard.get("decision_score_calibration"))
+    stability = _mapping_or_empty(dashboard.get("decision_stability"))
+    metadata = _mapping_or_empty(data.get("metadata"))
+
+    for candidate in (
+        data.get("guardrail_reason"),
+        data.get("downgrade_reason"),
+        data.get("decision_score_guardrail_reason"),
+        metadata.get("guardrail_reason"),
+        metadata.get("downgrade_reason"),
+        calibration.get("guardrail_reason"),
+        calibration.get("downgrade_reason"),
+        stability.get("guardrail_reason"),
+        stability.get("downgrade_reason"),
+        stability.get("reason"),
+    ):
+        text = _text_or_none(candidate)
+        if text:
+            return text
+    return None
 
 
 def score_action_conflicts_without_guardrail(

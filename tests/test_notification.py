@@ -725,6 +725,45 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("*分析模型: gemini/gemini-2.5-flash*", out)
 
     @mock.patch("src.notification.get_config")
+    def test_generate_brief_report_aligns_display_advice_with_score(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=70,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但旧建议仍为持有",
+        )
+
+        out = service.generate_brief_report([result], report_date="2026-07-06")
+
+        self.assertIn("> 1 只 | 🟢1 🟡0 🔴0", out)
+        self.assertIn("江波龙(301308.SZ)** 🟢 买入 | 评分 70", out)
+        self.assertNotIn("🟡 持有 | 评分 70", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_generate_brief_report_keeps_guardrailed_hold(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600276.SH",
+            name="恒瑞医药",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="有明确降级原因",
+            dashboard={"decision_stability": {"reason": "等待资金流确认"}},
+        )
+
+        out = service.generate_brief_report([result], report_date="2026-07-06")
+
+        self.assertIn("> 1 只 | 🟢0 🟡1 🔴0", out)
+        self.assertIn("恒瑞医药(600276.SH)** 🟡 持有 | 评分 72", out)
+        self.assertNotIn("🟢 买入 | 评分 72", out)
+
+    @mock.patch("src.notification.get_config")
     def test_generate_dashboard_report_shows_model_by_default(self, mock_get_config: mock.MagicMock):
         mock_get_config.return_value = _make_config(report_renderer_enabled=False)
         service = NotificationService()
@@ -1145,7 +1184,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         result = AnalysisResult(
             code="AAPL",
             name="Apple",
-            sentiment_score=65,
+            sentiment_score=55,
             trend_prediction="Sideways",
             operation_advice="Hold",
             analysis_summary="Wait for a cleaner breakout.",
