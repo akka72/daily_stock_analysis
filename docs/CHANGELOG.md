@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - [修复] 推送报告、Jinja 报告与历史 Markdown 导出复用 Web/API 的评分-action 口径：高分但旧 `operation_advice` 仍为持有且无降级原因时，建议文案与三类统计展示为买入；有明确 guardrail reason 时继续保留持有/观望。
 - [文档] #1949 明确回退范围：本次仅修正评分/展示口径与 `action` 输出对齐，不改动 LLM/LiteLLM/provider/model/base URL 的持久化配置、`cleanup`/迁移逻辑、运行时语义或模型/渠道回退链路；回退路径为按版本回滚本次变更。
-- [文档] 补全 #1949 PR 描述对齐项：实际 Scope Of Change 为 13 个文件（含 `src/report_language.py` 与 `tests/test_report_language.py`），与 `origin/main...HEAD` 及当前 Head CI 结论一致（`ai-governance` pass、`backend-gate` pass、`docker-build` pass、`web-gate` skipped，状态：全部通过）。
 - [改进] GitHub Actions 每日分析工作流补齐 TickFlow 数据源环境变量映射，并收敛 README 数据源稳定性说明到完整指南。
 - [修复] WebUI 启动时显式 `--host` / `--port` 不再被 `.env` 中的 `WEBUI_HOST` / `WEBUI_PORT` 覆盖，未传 CLI 参数时统一使用解析后的运行时配置。
 - [改进] GitHub Actions: 每日分析工作流（`00-daily-analysis.yml`）新增钉钉通知环境变量映射，支持在云端定时任务中直接使用钉钉机器人。
