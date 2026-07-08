@@ -20,8 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 新增 `NEWS_INTEL_AUTO_FETCH_ENABLED` 单开关，开启后个股分析、Agent 分析和大盘复盘会 fail-open 自动初始化并刷新 RSS/Atom/NewsNow 本地资讯池。
 - [改进] Web AI 建议页新增主股票上下文，复用最近分析和股票索引候选，并改进表现统计零样本说明。
 - [改进] 补充本次设置页布局收敛：移动端分类导航改为横向滚动列表并保证设置内容首屏可见，桌面端保留分类说明并收紧字段布局层级与间距，提升首屏效率与可配置信息密度。
-- [文档] #1949 已将 PR 描述同步到当前 Head：本轮范围为 `api/v1/endpoints/history.py`、`src/report_language.py`、`src/schemas/decision_action.py`、`src/schemas/decision_scale.py`、`src/services/history_comparison_service.py`、`src/services/history_service.py`、`src/services/report_renderer.py`、`src/notification.py`、`templates/report_markdown.j2`、`docs/CHANGELOG.md` 及对应测试文件（共 16 个文件，`1145 insertions / 102 deletions`）；兼容性与回归验证通过本轮回归测试（`tests/test_analysis_history.py`、`tests/test_decision_action.py`、`tests/test_history_comparison_service.py`、`tests/test_notification.py`、`tests/test_report_language.py`、`tests/test_report_renderer.py`）。
-- [文档] #1949 对外部模型/API 与运行时配置迁移扫描命中给出具体范围排除：影响范围仅在口径映射和展示层（`src/schemas/decision_action.py`、`src/schemas/decision_scale.py`、`src/services/history_service.py`、`src/services/history_comparison_service.py`、`src/services/report_renderer.py`、`api/v1/endpoints/history.py`、`templates/report_markdown.j2`、`src/notification.py`）；本 PR 不改 `Config` 写入、清理、迁移链路，不改 provider/model/base URL/LiteLLM 运行时路由；历史配置与用户 `.env` 变量不需回迁，回滚方式为 `revert 本 PR`。
 - [文档] 在 README 快速开始中补充行情数据源配置说明（TUSHARE_TOKEN / Longbridge），明确未配置时仍可走 AkShare、Baostock、YFinance 等免费兜底源，日志中相关提示不影响运行。同步更新docs下的中英双份 README
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
