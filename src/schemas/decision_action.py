@@ -432,7 +432,7 @@ def display_action_fields(
     """Return action fields aligned to the canonical score/action display contract."""
 
     action_source = explicit_action
-    if not str(action_source or "").strip() and str(action_label or "").strip():
+    if normalize_decision_action(action_source) is None and str(action_label or "").strip():
         action_source = action_label
 
     return build_action_fields(

@@ -444,6 +444,22 @@ def test_display_action_fields_falls_back_to_action_label_when_explicit_action_i
     }
 
 
+@pytest.mark.parametrize("explicit_action", ["unknown", "N/A"])
+def test_display_action_fields_falls_back_to_action_label_when_explicit_action_is_invalid(
+    explicit_action: str,
+) -> None:
+    assert display_action_fields(
+        operation_advice="持有",
+        explicit_action=explicit_action,
+        action_label="回避",
+        sentiment_score=72,
+        report_language="zh",
+    ) == {
+        "action": "avoid",
+        "action_label": "回避",
+    }
+
+
 def test_display_action_fields_for_result_falls_back_when_result_action_is_blank() -> None:
     class Result:
         operation_advice = "持有"
