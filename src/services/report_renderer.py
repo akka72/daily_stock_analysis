@@ -216,6 +216,7 @@ def render(
         "is_chip_structure_unavailable": is_chip_structure_unavailable,
         "localize_operation_advice": localize_operation_advice,
         "localize_action_label": localize_action_label,
+        "get_signal_level": get_signal_level,
         "localize_trend_prediction": localize_trend_prediction,
         "localize_chip_health": localize_chip_health,
         "signal_attribution_has_content": signal_attribution_has_content,

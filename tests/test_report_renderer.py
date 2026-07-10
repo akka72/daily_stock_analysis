@@ -203,6 +203,36 @@ class TestReportRenderer(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertIn("| 2026-07-01T10:00 | 78 | Buy |", out)
 
+    def test_render_markdown_history_compare_uses_score_aware_strong_buy_label(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=60,
+        )
+        for report_language, expected_label in (("zh", "强烈买入"), ("en", "Strong Buy")):
+            with self.subTest(report_language=report_language):
+                out = render(
+                    "markdown",
+                    [r],
+                    summary_only=False,
+                    extra_context={
+                        "history_by_code": {
+                            "600519": [
+                                {
+                                    "created_at": "2026-07-01T10:00:00+08:00",
+                                    "sentiment_score": 85,
+                                    "operation_advice": "持有",
+                                    "action": "buy",
+                                    "trend_prediction": "看多",
+                                }
+                            ]
+                        },
+                        "report_language": report_language,
+                    },
+                )
+
+                self.assertIsNotNone(out)
+                self.assertIn(f"| 2026-07-01T10:00 | 85 | {expected_label} |", out)
+
     def test_render_markdown_summary_ignores_unapplied_stability_reason(self) -> None:
         r = _make_result(
             dashboard={
