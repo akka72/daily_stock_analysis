@@ -126,9 +126,11 @@ def extract_decision_guardrail_reason(payload: Any) -> Optional[str]:
     calibration = _mapping_or_empty(dashboard.get("decision_score_calibration"))
     stability = _mapping_or_empty(dashboard.get("decision_stability"))
     metadata = _mapping_or_empty(data.get("metadata"))
+    stability_guardrail_reason = stability.get("guardrail_reason")
     stability_reason = stability.get("reason")
     stability_downgrade_reason = stability.get("downgrade_reason")
     if _is_falsey(stability.get("applied")):
+        stability_guardrail_reason = None
         stability_reason = None
         stability_downgrade_reason = None
 
@@ -140,7 +142,7 @@ def extract_decision_guardrail_reason(payload: Any) -> Optional[str]:
         metadata.get("downgrade_reason"),
         calibration.get("guardrail_reason"),
         calibration.get("downgrade_reason"),
-        stability.get("guardrail_reason"),
+        stability_guardrail_reason,
         stability_downgrade_reason,
         stability_reason,
     ):

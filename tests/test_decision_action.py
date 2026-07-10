@@ -691,26 +691,16 @@ def test_extract_decision_guardrail_reason_reads_dashboard_sources() -> None:
     ) == "capital flow is unavailable"
 
 
-def test_extract_decision_guardrail_reason_ignores_unapplied_stability_reason() -> None:
+@pytest.mark.parametrize("applied", [False, "off", "no"])
+def test_extract_decision_guardrail_reason_ignores_unapplied_stability_reason(applied) -> None:
     assert (
         extract_decision_guardrail_reason(
             {
                 "dashboard": {
                     "decision_stability": {
-                        "applied": False,
+                        "applied": applied,
+                        "guardrail_reason": "评分虽高，但暂按观望处理",
                         "reason": "资金流不可用，未使用资金流校准",
-                    }
-                }
-            }
-        )
-        is None
-    )
-    assert (
-        extract_decision_guardrail_reason(
-            {
-                "dashboard": {
-                    "decision_stability": {
-                        "applied": False,
                         "downgrade_reason": "资金流仍偏弱，暂按观望处理",
                     }
                 }
