@@ -41,8 +41,8 @@ function artifactNote(): string[] {
       '```',
       '',
       'PR 描述同步建议（建议直接同步）：',
-      '- 变更统计：`37 files changed, 4275 insertions(+), 31 deletions(-)`',
-      '- 当前 Head CI：`ai-governance:success / backend-gate:success / docker-build:success / web-gate:success`',
+      '- 变更统计：`37 files changed, 4253 insertions(+), 31 deletions(-)`',
+      '- 当前 Head CI：`ai-governance:pass / backend-gate:pass / docker-build:pass / web-gate:pass`（按实际运行结果同步）',
       '- 当前状态：全部通过（pass）或说明本地/环境差异。',
     ];
 
@@ -273,7 +273,6 @@ async function startStaticServer(rootDir: string): Promise<{
 }
 
 async function attachDesktopScreenshotArtifact(distIndexPath: string, testInfo: TestInfo): Promise<void> {
-  const fixtureDir = path.dirname(path.dirname(distIndexPath));
   let browser;
   try {
     browser = await chromium.launch();
