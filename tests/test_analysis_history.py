@@ -1002,6 +1002,33 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertEqual(detail["action"], "sell")
         self.assertEqual(detail["action_label"], "卖出")
 
+    def test_history_list_and_detail_preserves_negated_hold_over_legacy_decision_type(self) -> None:
+        result = self._build_result()
+        result.operation_advice = "不建议卖出"
+        result.action = "unknown"
+        result.decision_type = "sell"
+        result.sentiment_score = 50
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_history_negated_legacy_decision_type",
+            report_type="detailed",
+            news_content="个股正文",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        service = HistoryService(self.db)
+        listing = service.get_history_list(page=1, limit=10)
+        detail = service.resolve_and_get_detail("query_history_negated_legacy_decision_type")
+
+        self.assertEqual(listing["items"][0]["action"], "hold")
+        self.assertEqual(listing["items"][0]["action_label"], "持有")
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["action"], "hold")
+        self.assertEqual(detail["action_label"], "持有")
+
     def test_stock_bar_item_keeps_guardrailed_advice_from_dashboard_when_aligning(self) -> None:
         if get_stock_bar is None:
             self.skipTest("fastapi is not installed in this test environment")

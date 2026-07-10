@@ -343,6 +343,22 @@ def _has_strong_buy_marker(value: Any) -> bool:
     return any(marker in normalized for marker in _STRONG_BUY_TEXT_MARKERS)
 
 
+def _is_negated_hold_advice(value: Any) -> bool:
+    normalized = _normalize_key(value)
+    if not normalized:
+        return False
+
+    text = _mask_english_financial_compounds(normalized)
+    if _has_english_avoided_hold_action(text):
+        return True
+
+    for phrase in _NEGATED_ACTION_PHRASES.get("hold", ()):
+        if _word_or_substring_match(text, phrase):
+            return True
+
+    return False
+
+
 def _explicit_segment_actions(value: Any) -> set[DecisionAction]:
     text = str(value or "").strip()
     if not text:
@@ -460,6 +476,7 @@ def build_action_fields(
     action = normalize_decision_action(explicit_action)
     action_from_legacy = False
     operation_action = normalize_decision_action(operation_advice)
+    operation_action_is_negated_hold = _is_negated_hold_advice(operation_advice)
     legacy_action = normalize_decision_action(legacy_decision_type)
     action_from_legacy = False
 
@@ -470,11 +487,12 @@ def build_action_fields(
         action = legacy_action
         action_from_legacy = True
 
-    if action in {"hold", "watch"} and operation_action in {"hold", "watch"} and legacy_action in {
-        "buy",
-        "reduce",
-        "sell",
-    }:
+    if (
+        action in {"hold", "watch"}
+        and operation_action in {"hold", "watch"}
+        and not operation_action_is_negated_hold
+        and legacy_action in {"buy", "reduce", "sell"}
+    ):
         action = legacy_action
         action_from_legacy = True
 
@@ -539,6 +557,7 @@ def display_action_fields(
     if fields["action"] == "buy" and (
         _has_strong_buy_marker(action_source)
         or _has_strong_buy_marker(operation_advice)
+        or _has_strong_buy_marker(action_label)
     ):
         fields["action_label"] = _STRONG_BUY_LABELS[normalize_report_language(report_language)]
     return fields

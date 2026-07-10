@@ -619,6 +619,33 @@ def test_display_action_fields_prefers_strong_buy_action_label_when_explicit_lab
     }
 
 
+def test_display_action_fields_prefers_strong_buy_action_label_when_explicit_action_is_set() -> None:
+    assert display_action_fields(
+        operation_advice="持有",
+        explicit_action="buy",
+        action_label="强烈买入",
+        sentiment_score=72,
+        report_language="zh",
+    ) == {
+        "action": "buy",
+        "action_label": "强烈买入",
+    }
+
+
+@pytest.mark.parametrize("operation_advice", ["不建议卖出", "不建议加仓"])
+def test_build_action_fields_keeps_negated_hold_over_legacy_decision_type(
+    operation_advice: str,
+) -> None:
+    assert build_action_fields(
+        operation_advice=operation_advice,
+        legacy_decision_type="sell",
+        sentiment_score=50,
+    ) == {
+        "action": "hold",
+        "action_label": "持有",
+    }
+
+
 def test_display_action_fields_for_result_falls_back_when_result_action_is_blank() -> None:
     class Result:
         operation_advice = "持有"
