@@ -60,6 +60,8 @@ from src.schemas.decision_scale import (
         ("避免买入", "avoid"),
         ("回避买入", "avoid"),
         ("规避买入", "avoid"),
+        ("规避卖出", "avoid"),
+        ("回避减仓", "avoid"),
         ("do not buy", "avoid"),
         ("회피", "avoid"),
         ("alert", "alert"),

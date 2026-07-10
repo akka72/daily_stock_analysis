@@ -239,7 +239,14 @@ _NEGATED_ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
 
 _GUARD_ACTIONS: tuple[DecisionAction, ...] = ("avoid", "alert")
 _COMPOUND_GUARD_ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
-    "avoid": ("回避买入", "规避买入"),
+    "avoid": (
+        "回避买入",
+        "规避买入",
+        "回避减仓",
+        "规避减仓",
+        "回避卖出",
+        "规避卖出",
+    ),
 }
 _ENGLISH_NEGATED_ACTION_TERMS: Dict[DecisionAction, tuple[str, ...]] = {
     "avoid": ("buy",),
