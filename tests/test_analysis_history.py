@@ -755,6 +755,36 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertEqual(response.items[0].action, "avoid")
         self.assertEqual(response.items[0].action_label, "回避")
 
+    def test_stock_bar_item_keeps_compound_no_separator_avoid_phrase_with_high_score(self) -> None:
+        if get_stock_bar is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        result = self._build_result()
+        result.operation_advice = "回避买入"
+        result.sentiment_score = 88
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_stock_bar_compound_avoid",
+            report_type="detailed",
+            news_content="个股正文",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        response = get_stock_bar(
+            start_date=None,
+            end_date=None,
+            limit=10,
+            db_manager=self.db,
+        )
+
+        self.assertEqual(len(response.items), 1)
+        self.assertEqual(response.items[0].operation_advice, "回避买入")
+        self.assertEqual(response.items[0].action, "avoid")
+        self.assertEqual(response.items[0].action_label, "回避")
+
     def test_stock_bar_item_aligns_score_and_legacy_advice(self) -> None:
         if get_stock_bar is None:
             self.skipTest("fastapi is not installed in this test environment")

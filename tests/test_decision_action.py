@@ -58,6 +58,8 @@ from src.schemas.decision_scale import (
         ("规避", "avoid"),
         ("不建议买入", "avoid"),
         ("避免买入", "avoid"),
+        ("回避买入", "avoid"),
+        ("规避买入", "avoid"),
         ("do not buy", "avoid"),
         ("회피", "avoid"),
         ("alert", "alert"),
@@ -106,6 +108,11 @@ def test_normalize_decision_action_matrix(value: str, expected: str) -> None:
 )
 def test_normalize_decision_action_unknown_or_ambiguous_returns_none(value: str | None) -> None:
     assert normalize_decision_action(value) is None
+
+
+def test_normalize_decision_action_keeps_no_separator_avoid_buyings_as_avoid() -> None:
+    assert normalize_decision_action("回避买入") == "avoid"
+    assert normalize_decision_action("规避买入") == "avoid"
 
 
 @pytest.mark.parametrize(
@@ -191,6 +198,17 @@ def test_normalize_decision_action_handles_negated_trade_actions(value: str, exp
 )
 def test_build_action_fields_prioritizes_negated_buy_advice_over_embedded_buy_phrase(advice: str) -> None:
     assert build_action_fields(operation_advice=advice) == {
+        "action": "avoid",
+        "action_label": "回避",
+    }
+
+
+def test_build_action_fields_keeps_compound_no_separator_avoid_buy_with_score_alignment() -> None:
+    assert build_action_fields(
+        operation_advice="回避买入",
+        sentiment_score=90,
+        align_with_score=True,
+    ) == {
         "action": "avoid",
         "action_label": "回避",
     }

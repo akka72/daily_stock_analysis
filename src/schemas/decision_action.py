@@ -236,6 +236,9 @@ _NEGATED_ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
 }
 
 _GUARD_ACTIONS: tuple[DecisionAction, ...] = ("avoid", "alert")
+_COMPOUND_GUARD_ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
+    "avoid": ("回避买入", "规避买入"),
+}
 _ENGLISH_NEGATED_ACTION_TERMS: Dict[DecisionAction, tuple[str, ...]] = {
     "avoid": ("buy",),
     "hold": ("add", "accumulate", "sell", "reduce", "trim"),
@@ -305,6 +308,15 @@ def _has_english_deferred_action(text: str) -> bool:
     )
 
 
+def _resolve_compound_guard_action(text: str) -> Optional[DecisionAction]:
+    """Resolve no-delimiter guard phrases that should stay as guard actions."""
+
+    for action, phrases in _COMPOUND_GUARD_ACTION_PHRASES.items():
+        if any(_word_or_substring_match(text, phrase) for phrase in phrases):
+            return action
+    return None
+
+
 def _explicit_action(value: Any) -> Optional[DecisionAction]:
     normalized = _normalize_key(value)
     if not normalized:
@@ -343,6 +355,10 @@ def normalize_decision_action(value: Any) -> Optional[DecisionAction]:
 
     if _has_english_deferred_action(text):
         return None
+
+    compound_guard_action = _resolve_compound_guard_action(text)
+    if compound_guard_action is not None:
+        return compound_guard_action
 
     segmented_actions = _explicit_segment_actions(value)
     segmented_guard_actions = segmented_actions & set(_GUARD_ACTIONS)
