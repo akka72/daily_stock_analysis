@@ -1553,6 +1553,58 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         self.assertEqual(report.summary.action, "hold")
         self.assertEqual(report.summary.action_label, "持有")
 
+    def test_build_analysis_report_keeps_negated_hold_with_high_directional_score(self) -> None:
+        if _build_analysis_report is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        report = _build_analysis_report(
+            report_data={
+                "meta": {"report_type": "detailed", "report_language": "zh"},
+                "summary": {
+                    "analysis_summary": "等待确认",
+                    "operation_advice": "不建议加仓",
+                    "sentiment_score": 72,
+                },
+                "strategy": {},
+                "details": {},
+            },
+            query_id="q3",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            context_snapshot=None,
+            fallback_fundamental_payload=None,
+        )
+
+        self.assertEqual(report.summary.operation_advice, "不建议加仓")
+        self.assertEqual(report.summary.action, "hold")
+        self.assertEqual(report.summary.action_label, "持有")
+
+    def test_build_analysis_report_keeps_negated_hold_with_low_directional_score(self) -> None:
+        if _build_analysis_report is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        report = _build_analysis_report(
+            report_data={
+                "meta": {"report_type": "detailed", "report_language": "zh"},
+                "summary": {
+                    "analysis_summary": "等待确认",
+                    "operation_advice": "do not sell",
+                    "sentiment_score": 28,
+                },
+                "strategy": {},
+                "details": {},
+            },
+            query_id="q4",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            context_snapshot=None,
+            fallback_fundamental_payload=None,
+        )
+
+        self.assertEqual(report.summary.operation_advice, "do not sell")
+        self.assertEqual(report.summary.action, "hold")
+        self.assertEqual(report.summary.action_label, "持有")
+
     def test_build_analysis_report_preserves_legacy_action_with_dashboard_guardrail_reason(self) -> None:
         if _build_analysis_report is None:
             self.skipTest("analysis endpoint helpers unavailable in this environment")

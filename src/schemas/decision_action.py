@@ -528,6 +528,7 @@ def build_action_fields(
         score=sentiment_score,
         action=action,
         guardrail_reason=guardrail_reason,
+        allow_negated_hold_conflict=not operation_action_is_negated_hold,
     ):
         score_action = action_for_score(sentiment_score)
         if score_action in _ACTION_VALUES:

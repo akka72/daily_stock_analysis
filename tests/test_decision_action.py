@@ -520,6 +520,30 @@ def test_build_action_fields_can_align_neutral_action_with_directional_score() -
     ) == {"action": "reduce", "action_label": "减仓"}
 
 
+@pytest.mark.parametrize(
+    ("advice", "sentiment_score", "expected"),
+    [
+        ("不建议加仓", 72, "hold"),
+        ("do not sell", 28, "hold"),
+        ("不建议卖出", 72, "hold"),
+    ],
+)
+def test_build_action_fields_keeps_negated_hold_over_directional_score_alignment(
+    advice: str,
+    sentiment_score: int,
+    expected: str,
+) -> None:
+    assert build_action_fields(
+        operation_advice=advice,
+        sentiment_score=sentiment_score,
+        align_with_score=True,
+        report_language="zh",
+    ) == {
+        "action": expected,
+        "action_label": "持有",
+    }
+
+
 def test_build_action_fields_keeps_neutral_score_conflict_when_guardrail_is_explicit() -> None:
     assert build_action_fields(
         operation_advice="持有/观望待回踩",

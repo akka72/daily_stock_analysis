@@ -157,6 +157,7 @@ def score_action_conflicts_without_guardrail(
     score: Any,
     action: Any,
     guardrail_reason: Any = None,
+    allow_negated_hold_conflict: bool = True,
 ) -> bool:
     """Return True when a neutral action conflicts with a directional score."""
 
@@ -164,6 +165,8 @@ def score_action_conflicts_without_guardrail(
         return False
     normalized_action = str(action or "").strip().lower()
     if normalized_action not in {"hold", "watch"}:
+        return False
+    if not allow_negated_hold_conflict and normalized_action == "hold":
         return False
     score_action = action_for_score(score)
     return score_action in {"buy", "reduce", "sell"}
