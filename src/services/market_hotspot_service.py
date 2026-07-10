@@ -331,7 +331,12 @@ class MarketHotspotService:
                 lambda: fetch_rankings(limit),
                 timeout_seconds=self._resolve_ranking_fetch_timeout_seconds(),
                 task_name=dataset,
-                inflight_key=(type(self.fetcher_manager), fetch_name, limit),
+                inflight_key=(
+                    type(self.fetcher_manager),
+                    id(self.fetcher_manager),
+                    fetch_name,
+                    limit,
+                ),
             )
             if isinstance(rankings, tuple) and len(rankings) == 2:
                 top, bottom = rankings

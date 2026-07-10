@@ -188,6 +188,25 @@ class _BlockingRankingFetcherManager:
         return ([{"name": "机器人概念", "change_pct": 4.2}], [])
 
 
+class _ManagerScopedBlockingRankingFetcher:
+    def __init__(self, name: str, release: threading.Event) -> None:
+        self.name = name
+        self.release = release
+        self.sector_started = threading.Event()
+        self.sector_calls = 0
+        self.concept_calls = 0
+
+    def get_sector_rankings(self, n: int = 5):
+        self.sector_calls += 1
+        self.sector_started.set()
+        self.release.wait(timeout=1)
+        return ([{"name": f"{self.name}行业", "change_pct": 2.1}], [])
+
+    def get_concept_rankings(self, n: int = 5):
+        self.concept_calls += 1
+        return ([{"name": f"{self.name}概念", "change_pct": 4.2}], [])
+
+
 class _RecoveringTimeoutRankingFetcherManager:
     def __init__(self) -> None:
         self.release_first_sector = threading.Event()
@@ -353,6 +372,40 @@ def test_market_hotspot_service_does_not_stack_workers_after_timeout() -> None:
     assert any("timeout" in error for error in second["data_quality"]["errors"])
 
 
+def test_market_hotspot_service_scopes_inflight_fetches_to_manager_instance() -> None:
+    release = threading.Event()
+    first_fetcher = _ManagerScopedBlockingRankingFetcher("甲", release)
+    second_fetcher = _ManagerScopedBlockingRankingFetcher("乙", release)
+    services = (
+        MarketHotspotService(fetcher_manager=first_fetcher),
+        MarketHotspotService(fetcher_manager=second_fetcher),
+    )
+    contexts = [None, None]
+
+    def fetch(index: int) -> None:
+        contexts[index] = services[index].get_hotspots(
+            market="cn",
+            trade_date="2026-07-04",
+        )
+
+    threads = [threading.Thread(target=fetch, args=(index,)) for index in range(2)]
+    try:
+        threads[0].start()
+        assert first_fetcher.sector_started.wait(timeout=0.2)
+        threads[1].start()
+        assert second_fetcher.sector_started.wait(timeout=0.2)
+    finally:
+        release.set()
+        for thread in threads:
+            if thread.ident is not None:
+                thread.join(timeout=1)
+
+    assert contexts[0]["leading_industries"][0]["name"] == "甲行业"
+    assert contexts[1]["leading_industries"][0]["name"] == "乙行业"
+    assert first_fetcher.sector_calls == 1
+    assert second_fetcher.sector_calls == 1
+
+
 def test_market_hotspot_service_retries_after_ranking_timeout_cooldown() -> None:
     fetcher = _RecoveringTimeoutRankingFetcherManager()
     service = MarketHotspotService(
@@ -394,7 +447,7 @@ def test_market_hotspot_service_drops_stale_timeout_future_before_retry() -> Non
         failure_cache_ttl_seconds=0.0,
     )
     stale_future: Future = Future()
-    inflight_key = (type(fetcher), "get_sector_rankings", 5)
+    inflight_key = (type(fetcher), id(fetcher), "get_sector_rankings", 5)
     stale_future.add_done_callback(
         lambda done_future: MarketHotspotService._forget_ranking_fetch(
             inflight_key, done_future
