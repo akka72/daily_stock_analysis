@@ -79,7 +79,34 @@ class TestReportRenderer(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertIn("决策仪表盘", out)
         self.assertIn("贵州茅台", out)
-        self.assertIn("持有", out)
+        self.assertIn("🟢买入:1 🟡观望:0 🔴卖出:0", out)
+        self.assertIn("买入 | 评分 72", out)
+
+    def test_render_markdown_summary_keeps_guardrailed_hold(self) -> None:
+        r = _make_result(
+            dashboard={
+                "decision_stability": {"reason": "等待支撑确认"},
+            }
+        )
+
+        out = render("markdown", [r], summary_only=True)
+
+        self.assertIsNotNone(out)
+        self.assertIn("🟢买入:0 🟡观望:1 🔴卖出:0", out)
+        self.assertIn("持有 | 评分 72", out)
+        self.assertNotIn("买入 | 评分 72", out)
+
+    def test_render_markdown_summary_keeps_legacy_decision_type_when_display_action_missing(self) -> None:
+        r = _make_result(
+            operation_advice="未知波动信号",
+            decision_type="buy",
+            sentiment_score=72,
+        )
+
+        out = render("markdown", [r], summary_only=True)
+
+        self.assertIsNotNone(out)
+        self.assertIn("🟢买入:1 🟡观望:0 🔴卖出:0", out)
 
     def test_render_markdown_full(self) -> None:
         """Markdown platform renders full report."""
@@ -89,6 +116,173 @@ class TestReportRenderer(unittest.TestCase):
         self.assertIn("核心结论", out)
         self.assertIn("作战计划", out)
         self.assertNotIn("盘中决策护栏", out)
+
+    def test_render_markdown_history_compare_uses_aligned_action_label(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=60,
+        )
+        out = render(
+            "markdown",
+            [r],
+            summary_only=False,
+            extra_context={
+                "history_by_code": {
+                    "600519": [
+                        {
+                            "created_at": "2026-07-01T10:00:00+08:00",
+                            "sentiment_score": 78,
+                            "operation_advice": "持有",
+                            "trend_prediction": "看多",
+                            "action_label": "买入",
+                        }
+                    ]
+                }
+            },
+        )
+
+        self.assertIsNotNone(out)
+        self.assertIn("| 2026-07-01T10:00 | 78 | 买入 | 看多 |", out)
+        self.assertNotIn("| 2026-07-01T10:00 | 78 | 持有 | 看多 |", out)
+
+    def test_render_markdown_history_compare_localizes_stale_action_label_by_report_language(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=60,
+        )
+        out = render(
+            "markdown",
+            [r],
+            summary_only=False,
+            extra_context={
+                "history_by_code": {
+                    "600519": [
+                        {
+                            "created_at": "2026-07-01T10:00:00+08:00",
+                            "sentiment_score": 78,
+                            "operation_advice": "观望",
+                            "action_label": "回避",
+                            "trend_prediction": "看多",
+                        }
+                    ]
+                },
+                "report_language": "en",
+            },
+        )
+
+        self.assertIsNotNone(out)
+        self.assertIn("| 2026-07-01T10:00 | 78 | Avoid |", out)
+        self.assertNotIn("| 2026-07-01T10:00 | 78 | 回避 |", out)
+
+    def test_render_markdown_history_compare_localizes_action_by_report_language(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=60,
+        )
+        out = render(
+            "markdown",
+            [r],
+            summary_only=False,
+            extra_context={
+                "history_by_code": {
+                    "600519": [
+                        {
+                            "created_at": "2026-07-01T10:00:00+08:00",
+                            "sentiment_score": 78,
+                            "operation_advice": "持有",
+                            "action": "buy",
+                            "action_label": "持有",
+                            "trend_prediction": "看多",
+                        }
+                    ]
+                },
+                "report_language": "en",
+            },
+        )
+
+        self.assertIsNotNone(out)
+        self.assertIn("| 2026-07-01T10:00 | 78 | Buy |", out)
+
+    def test_render_markdown_summary_ignores_unapplied_stability_reason(self) -> None:
+        r = _make_result(
+            dashboard={
+                "decision_stability": {
+                    "applied": False,
+                    "reason": "未使用资金流校准",
+                },
+            }
+        )
+
+        out = render("markdown", [r], summary_only=True)
+
+        self.assertIsNotNone(out)
+        self.assertIn("🟢买入:1 🟡观望:0 🔴卖出:0", out)
+        self.assertIn("买入 | 评分 72", out)
+        self.assertNotIn("持有 | 评分 72", out)
+
+    def test_render_markdown_full_shows_strong_buy_signal_for_80_plus_legacy_advice(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=85,
+            analysis_summary="高分但旧建议仍为持有",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但旧建议仍为持有"},
+            },
+        )
+
+        out = render("markdown", [r], summary_only=False)
+
+        self.assertIsNotNone(out)
+        self.assertIn("**💚 强烈买入** | 看多", out)
+        self.assertNotIn("**🟢 买入** | 看多", out)
+
+    def test_render_markdown_summary_only_shows_strong_buy_for_80_plus_legacy_advice(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=85,
+            analysis_summary="高分但旧建议仍为持有",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但旧建议仍为持有"},
+            },
+        )
+
+        out = render("markdown", [r], summary_only=True)
+
+        self.assertIsNotNone(out)
+        self.assertIn("💚 **贵州茅台(600519)**: 强烈买入 | 评分 85", out)
+        self.assertNotIn("🟢 **贵州茅台(600519)**: 买入 | 评分 85", out)
+
+    def test_render_brief_shows_strong_buy_for_80_plus_legacy_advice(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=85,
+            analysis_summary="高分但旧建议仍为持有",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但旧建议仍为持有"},
+            },
+        )
+
+        out = render("brief", [r])
+
+        self.assertIsNotNone(out)
+        self.assertIn("**贵州茅台(600519)** 💚 强烈买入 | 评分 85", out)
+        self.assertNotIn("**贵州茅台(600519)** 🟢 买入 | 评分 85", out)
+
+    def test_render_wechat_summary_only_shows_strong_buy_for_80_plus_legacy_advice(self) -> None:
+        r = _make_result(
+            operation_advice="持有",
+            sentiment_score=85,
+            analysis_summary="高分但旧建议仍为持有",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但旧建议仍为持有"},
+            },
+        )
+
+        out = render("wechat", [r], summary_only=True)
+
+        self.assertIsNotNone(out)
+        self.assertIn("💚 **贵州茅台(600519)**: 强烈买入 | 评分 85", out)
+        self.assertNotIn("🟢 **贵州茅台(600519)**: 买入 | 评分 85", out)
 
     def test_render_markdown_keeps_decision_signal_out_of_summary(self) -> None:
         """Markdown summary stays compact while full details keep DecisionSignal excerpts."""

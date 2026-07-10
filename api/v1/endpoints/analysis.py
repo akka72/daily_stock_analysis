@@ -76,7 +76,8 @@ from src.market_phase_summary import (
 )
 from src.services.stock_code_utils import is_code_like, resolve_index_stock_code_for_analysis
 from src.report_language import get_localized_stock_name, normalize_report_language
-from src.schemas.decision_action import build_action_fields
+from src.schemas.decision_action import display_action_fields
+from src.schemas.decision_scale import extract_decision_guardrail_reason
 from src.services.name_to_code_resolver import resolve_name_to_code
 from src.services.task_queue import (
     get_task_queue,
@@ -180,28 +181,6 @@ def _coalesce_text(*values: Any) -> Optional[str]:
         text = str(value).strip()
         if text:
             return text
-    return None
-
-
-def _extract_guardrail_reason(raw_result: Any) -> Optional[str]:
-    if not isinstance(raw_result, dict):
-        return None
-    for reason in (
-        raw_result.get("guardrail_reason"),
-        raw_result.get("downgrade_reason"),
-        raw_result.get("decision_score_guardrail_reason"),
-    ):
-        if reason is not None:
-            text = str(reason).strip()
-            if text:
-                return text
-    metadata = raw_result.get("metadata")
-    if isinstance(metadata, dict):
-        metadata_reason = metadata.get("guardrail_reason") or metadata.get("downgrade_reason")
-        if metadata_reason is not None:
-            text = str(metadata_reason).strip()
-            if text:
-                return text
     return None
 
 
@@ -904,17 +883,17 @@ def _ensure_report_action_fields(report_data: Dict[str, Any]) -> Dict[str, Any]:
     report_language = normalize_report_language(
         meta.get("report_language") or raw_result.get("report_language")
     )
-    action_fields = build_action_fields(
+    action_fields = display_action_fields(
         operation_advice=raw_result.get("operation_advice") or summary.get("operation_advice"),
         explicit_action=raw_result.get("action") or summary.get("action"),
+        action_label=raw_result.get("action_label") or summary.get("action_label"),
         report_type=meta.get("report_type"),
         report_language=report_language,
         sentiment_score=_first_non_empty_report_value(
             summary.get("sentiment_score"),
             raw_result.get("sentiment_score"),
         ),
-        guardrail_reason=_extract_guardrail_reason(raw_result),
-        align_with_score=True,
+        guardrail_reason=extract_decision_guardrail_reason(raw_result),
     )
     summary["action"] = action_fields["action"]
     summary["action_label"] = action_fields["action_label"]
@@ -1159,14 +1138,14 @@ def get_analysis_status(task_id: str) -> TaskStatus:
                 )
 
             raw_dict = raw_result if isinstance(raw_result, dict) else {}
-            action_fields = build_action_fields(
+            action_fields = display_action_fields(
                 operation_advice=raw_dict.get("operation_advice") or record.operation_advice,
                 explicit_action=raw_dict.get("action"),
+                action_label=raw_dict.get("action_label"),
                 report_type=getattr(record, 'report_type', None),
                 report_language=report_language,
                 sentiment_score=record.sentiment_score if record.sentiment_score is not None else raw_dict.get("sentiment_score"),
-                guardrail_reason=_extract_guardrail_reason(raw_dict),
-                align_with_score=True,
+                guardrail_reason=extract_decision_guardrail_reason(raw_dict),
             )
 
             # Build report from DB record so completed tasks return real data
@@ -1343,13 +1322,16 @@ def _build_analysis_report(
     )
 
     raw_result_data = details_data.get("raw_result") if isinstance(details_data.get("raw_result"), dict) else {}
-    action_fields = build_action_fields(
+    action_fields = display_action_fields(
         operation_advice=(
             raw_result_data.get("operation_advice")
             or details_data.get("operation_advice")
             or summary_data.get("operation_advice")
         ),
         explicit_action=raw_result_data.get("action") or details_data.get("action") or summary_data.get("action"),
+        action_label=raw_result_data.get("action_label")
+        or details_data.get("action_label")
+        or summary_data.get("action_label"),
         report_type=meta.report_type,
         report_language=report_language,
         sentiment_score=_first_non_empty_report_value(
@@ -1357,8 +1339,7 @@ def _build_analysis_report(
             raw_result_data.get("sentiment_score"),
             details_data.get("sentiment_score"),
         ),
-        guardrail_reason=_extract_guardrail_reason(raw_result_data),
-        align_with_score=True,
+        guardrail_reason=extract_decision_guardrail_reason(raw_result_data),
     )
 
     summary = ReportSummary(

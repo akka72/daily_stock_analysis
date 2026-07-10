@@ -30,7 +30,7 @@ for optional_module in ("litellm", "json_repair"):
         sys.modules[optional_module] = mock.MagicMock()
 
 from src.config import Config
-from src.notification import NotificationService, NotificationChannel
+from src.notification import NotificationBuilder, NotificationService, NotificationChannel
 from src.notification_noise import reset_notification_noise_state
 from src.analyzer import AnalysisResult
 from bot.models import BotMessage, ChatType
@@ -725,6 +725,91 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("*分析模型: gemini/gemini-2.5-flash*", out)
 
     @mock.patch("src.notification.get_config")
+    def test_generate_brief_report_aligns_display_advice_with_score(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=70,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但旧建议仍为持有",
+        )
+
+        out = service.generate_brief_report([result], report_date="2026-07-06")
+
+        self.assertIn("> 1 只 | 🟢1 🟡0 🔴0", out)
+        self.assertIn("江波龙(301308.SZ)** 🟢 买入 | 评分 70", out)
+        self.assertNotIn("🟡 持有 | 评分 70", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_generate_brief_report_aligns_legacy_advice_to_strong_buy_for_80_plus(
+        self,
+        mock_get_config: mock.MagicMock,
+    ):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=85,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分且旧建议仍为持有",
+        )
+
+        out = service.generate_brief_report([result], report_date="2026-07-06")
+
+        self.assertIn("> 1 只 | 🟢1 🟡0 🔴0", out)
+        self.assertIn("江波龙(301308.SZ)** 💚 强烈买入 | 评分 85", out)
+        self.assertNotIn("江波龙(301308.SZ)** 💚 买入 | 评分 85", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_generate_brief_report_keeps_guardrailed_hold(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600276.SH",
+            name="恒瑞医药",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="有明确降级原因",
+            dashboard={"decision_stability": {"reason": "等待资金流确认"}},
+        )
+
+        out = service.generate_brief_report([result], report_date="2026-07-06")
+
+        self.assertIn("> 1 只 | 🟢0 🟡1 🔴0", out)
+        self.assertIn("恒瑞医药(600276.SH)** 🟡 持有 | 评分 72", out)
+        self.assertNotIn("🟢 买入 | 评分 72", out)
+
+    @mock.patch("src.notification.get_config")
+    def test_generate_brief_report_maps_explicit_guard_action_before_score_fallback(
+        self,
+        mock_get_config: mock.MagicMock,
+    ):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但显式回避",
+            action="avoid",
+            action_label="回避",
+        )
+
+        out = service.generate_brief_report([result], report_date="2026-07-06")
+
+        self.assertIn("> 1 只 | 🟢0 🟡1 🔴0", out)
+        self.assertIn("江波龙(301308.SZ)** 🟡 回避 | 评分 72", out)
+        self.assertNotIn("🟢 回避 | 评分 72", out)
+
+    @mock.patch("src.notification.get_config")
     def test_generate_dashboard_report_shows_model_by_default(self, mock_get_config: mock.MagicMock):
         mock_get_config.return_value = _make_config(report_renderer_enabled=False)
         service = NotificationService()
@@ -900,6 +985,42 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertNotIn("动作: 卖出", out)
 
     @mock.patch("src.notification.get_config")
+    def test_generate_wechat_summary_aligns_legacy_advice_to_strong_buy_for_80_plus(
+        self, mock_get_config: mock.MagicMock
+    ):
+        mock_get_config.return_value = _make_config(report_renderer_enabled=False)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=85,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分且旧建议仍为持有",
+        )
+
+        out = service.generate_wechat_summary([result])
+
+        self.assertIn("### 💚 江波龙(301308.SZ)", out)
+        self.assertIn("**强烈买入** | 评分:85 |", out)
+        self.assertNotIn("**买入** | 评分:85 |", out)
+
+    def test_build_stock_summary_aligns_legacy_advice_to_score_level_for_80_plus(self) -> None:
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=85,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但旧建议仍为持有",
+        )
+
+        out = NotificationBuilder.build_stock_summary([result])
+
+        self.assertIn("💚 江波龙(301308.SZ): 强烈买入 | 评分 85", out)
+        self.assertNotIn("🟢 江波龙(301308.SZ): 买入 | 评分 85", out)
+
+    @mock.patch("src.notification.get_config")
     def test_generate_dashboard_report_appends_decision_signal_excerpt_with_renderer(
         self, mock_get_config: mock.MagicMock
     ):
@@ -922,6 +1043,45 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("动作: 卖出", detail_section)
         self.assertIn("周期: 1d", detail_section)
         self.assertIn("理由: 技术面走弱", detail_section)
+
+    @mock.patch("src.notification.get_config")
+    @mock.patch("src.services.history_comparison_service.get_signal_changes_batch")
+    def test_generate_dashboard_report_localizes_history_compare_label_with_renderer(
+        self,
+        mock_get_signal_changes_batch: mock.MagicMock,
+        mock_get_config: mock.MagicMock,
+    ):
+        mock_get_config.return_value = _make_config(
+            report_renderer_enabled=True,
+            report_language="en",
+            report_history_compare_n=2,
+        )
+        mock_get_signal_changes_batch.return_value = {
+            "600519": [
+                {
+                    "created_at": "2026-07-01T10:00:00+08:00",
+                    "sentiment_score": 78,
+                    "operation_advice": "持有",
+                    "action_label": "回避",
+                    "trend_prediction": "看多",
+                },
+            ]
+        }
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            report_language="en",
+        )
+
+        out = service.generate_dashboard_report([result], report_date="2026-07-01")
+
+        self.assertIn("| 2026-07-01T10:00 | 78 | Avoid |", out)
+        self.assertNotIn("| 2026-07-01T10:00 | 78 | 回避 |", out)
 
     @mock.patch("src.notification.get_config")
     def test_aggregate_reports_show_compact_market_status_only(self, mock_get_config: mock.MagicMock):
@@ -1145,7 +1305,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         result = AnalysisResult(
             code="AAPL",
             name="Apple",
-            sentiment_score=65,
+            sentiment_score=55,
             trend_prediction="Sideways",
             operation_advice="Hold",
             analysis_summary="Wait for a cleaner breakout.",
@@ -1727,6 +1887,73 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertEqual(first, {"history_by_code": {"600519": []}})
         self.assertEqual(second, {"history_by_code": {"600519": []}})
         mock_batch.assert_called_once()
+
+    @mock.patch("src.notification.get_config")
+    def test_history_compare_context_forwards_report_language(self, mock_get_config: mock.MagicMock):
+        mock_get_config.return_value = _make_config(report_language="en", report_history_compare_n=2)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            report_language="en",
+            query_id="q-lang",
+        )
+
+        with mock.patch(
+            "src.services.history_comparison_service.get_signal_changes_batch",
+            return_value={"600519": []},
+        ) as mock_batch:
+            service._get_history_compare_context([result])
+
+        mock_batch.assert_called_once_with(
+            ["600519"],
+            limit=2,
+            exclude_query_ids={"600519": "q-lang"},
+            report_language="en",
+        )
+
+    @mock.patch("src.notification.get_config")
+    def test_history_compare_context_cache_key_includes_report_language(
+        self, mock_get_config: mock.MagicMock
+    ):
+        mock_get_config.return_value = _make_config(report_history_compare_n=2)
+        service = NotificationService()
+        result = AnalysisResult(
+            code="600519",
+            name="贵州茅台",
+            sentiment_score=72,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="稳健",
+            report_language="en",
+            query_id="q-lang",
+        )
+
+        def fake_signal_changes(codes, **kwargs):
+            report_language = kwargs["report_language"]
+            return {codes[0]: [{"action_label": f"{report_language}-label"}]}
+
+        with mock.patch(
+            "src.services.history_comparison_service.get_signal_changes_batch",
+            side_effect=fake_signal_changes,
+        ) as mock_batch:
+            first = service._get_history_compare_context([result])
+            result.report_language = "zh"
+            second = service._get_history_compare_context([result])
+
+        self.assertEqual(
+            first,
+            {"history_by_code": {"600519": [{"action_label": "en-label"}]}},
+        )
+        self.assertEqual(
+            second,
+            {"history_by_code": {"600519": [{"action_label": "zh-label"}]}},
+        )
+        self.assertEqual(mock_batch.call_count, 2)
 
     @mock.patch("src.notification.get_config")
     @mock.patch("smtplib.SMTP_SSL")

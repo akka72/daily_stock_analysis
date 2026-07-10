@@ -33,6 +33,27 @@ class ReportLanguageTestCase(unittest.TestCase):
         self.assertEqual(emoji, "🟢")
         self.assertEqual(signal_tag, "buy")
 
+    def test_get_signal_level_prefers_trade_term_over_alert_prefix(self) -> None:
+        signal_text, emoji, signal_tag = get_signal_level("风险预警，建议卖出", 40, "zh")
+        self.assertEqual(signal_text, "卖出")
+        self.assertEqual(emoji, "🔴")
+        self.assertEqual(signal_tag, "sell")
+
+        signal_text, emoji, signal_tag = get_signal_level("Alert, sell", 40, "en")
+        self.assertEqual(signal_text, "Sell")
+        self.assertEqual(emoji, "🔴")
+        self.assertEqual(signal_tag, "sell")
+
+    def test_get_signal_level_upgrades_legacy_buy_signal_for_high_score(self) -> None:
+        self.assertEqual(
+            get_signal_level("买入", 85, "zh"),
+            ("强烈买入", "💚", "strong_buy"),
+        )
+        self.assertEqual(
+            get_signal_level("Buy", 88, "en"),
+            ("Strong Buy", "💚", "strong_buy"),
+        )
+
     def test_get_signal_level_score_fallback_uses_canonical_scale(self) -> None:
         self.assertEqual(get_signal_level("", 28, "zh"), ("减仓", "🟠", "reduce"))
         self.assertEqual(get_signal_level("", 38, "zh"), ("减仓", "🟠", "reduce"))
@@ -41,6 +62,19 @@ class ReportLanguageTestCase(unittest.TestCase):
         self.assertEqual(get_signal_level("", 60, "zh"), ("买入", "🟢", "buy"))
         self.assertEqual(get_signal_level("", 66, "zh"), ("买入", "🟢", "buy"))
         self.assertEqual(get_signal_level("", 72, "zh"), ("买入", "🟢", "buy"))
+
+    def test_get_signal_level_maps_guard_actions_before_score_fallback(self) -> None:
+        self.assertEqual(get_signal_level("回避", 72, "zh"), ("回避", "🟡", "hold"))
+        self.assertEqual(get_signal_level("Alert", 72, "en"), ("Alert", "🟡", "hold"))
+        self.assertEqual(infer_decision_type_from_advice("风险预警", default="buy"), "hold")
+        self.assertEqual(
+            infer_decision_type_from_advice("风险预警，建议卖出", default="hold"),
+            "sell",
+        )
+        self.assertEqual(
+            infer_decision_type_from_advice("Alert, sell", default="hold"),
+            "sell",
+        )
 
     def test_get_localized_stock_name_replaces_placeholder_for_english(self) -> None:
         self.assertEqual(
@@ -137,6 +171,12 @@ class KoreanReportLanguageTestCase(unittest.TestCase):
     def test_korean_advice_resolves_signal_level(self) -> None:
         self.assertEqual(get_signal_level("매수", 72, "ko"), ("매수", "🟢", "buy"))
         self.assertEqual(get_signal_level("매도", 30, "ko"), ("매도", "🔴", "sell"))
+
+    def test_korean_compound_alert_advice_prefers_trade_action(self) -> None:
+        self.assertEqual(get_signal_level("경고, 매도", 40, "ko"), ("매도", "🔴", "sell"))
+        self.assertEqual(get_signal_level("경고, 비중축소", 40, "ko"), ("비중축소", "🟠", "reduce"))
+        self.assertEqual(infer_decision_type_from_advice("경고, 매도"), "sell")
+        self.assertEqual(infer_decision_type_from_advice("경고, 비중축소"), "sell")
 
     def test_korean_values_canonicalize_back_for_other_languages(self) -> None:
         self.assertEqual(localize_trend_prediction("상승", "en"), "Bullish")

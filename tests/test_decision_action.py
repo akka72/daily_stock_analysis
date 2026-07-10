@@ -5,10 +5,19 @@ import pytest
 
 from src.schemas.decision_action import (
     build_action_fields,
+    display_action_fields,
+    display_action_fields_for_result,
+    display_decision_type_for_result,
+    display_operation_advice,
     localize_action_label,
     normalize_decision_action,
 )
-from src.schemas.decision_scale import action_for_score, decision_type_for_score, signal_key_for_score
+from src.schemas.decision_scale import (
+    action_for_score,
+    decision_type_for_score,
+    extract_decision_guardrail_reason,
+    signal_key_for_score,
+)
 
 
 @pytest.mark.parametrize(
@@ -19,6 +28,8 @@ from src.schemas.decision_scale import action_for_score, decision_type_for_score
         ("买入", "buy"),
         ("布局", "buy"),
         ("建仓", "buy"),
+        ("매수", "buy"),
+        ("추가 매수", "add"),
         ("add", "add"),
         ("加仓", "add"),
         ("增持", "add"),
@@ -27,6 +38,8 @@ from src.schemas.decision_scale import action_for_score, decision_type_for_score
         ("持有", "hold"),
         ("持有观察", "hold"),
         ("洗盘观察", "hold"),
+        ("보유", "hold"),
+        ("관망", "watch"),
         ("watch", "watch"),
         ("观望", "watch"),
         ("等待", "watch"),
@@ -39,17 +52,26 @@ from src.schemas.decision_scale import action_for_score, decision_type_for_score
         ("清仓", "sell"),
         ("strong_sell", "sell"),
         ("强烈卖出", "sell"),
+        ("매도", "sell"),
         ("avoid", "avoid"),
         ("回避", "avoid"),
         ("规避", "avoid"),
         ("不建议买入", "avoid"),
         ("避免买入", "avoid"),
         ("do not buy", "avoid"),
+        ("회피", "avoid"),
         ("alert", "alert"),
         ("风险预警", "alert"),
         ("警惕", "alert"),
         ("触发告警", "alert"),
         ("risk alert", "alert"),
+        ("경고", "alert"),
+        ("风险预警，建议卖出", "sell"),
+        ("风险预警，建议减仓", "reduce"),
+        ("Alert, sell", "sell"),
+        ("경고, 매도", "sell"),
+        ("경고, 비중축소", "reduce"),
+        ("경고, 매수", "buy"),
     ],
 )
 def test_normalize_decision_action_matrix(value: str, expected: str) -> None:
@@ -221,6 +243,43 @@ def test_build_action_fields_keeps_multi_guard_advice_empty(advice: str) -> None
     }
 
 
+def test_build_action_fields_prefers_trade_term_over_alert_prefix() -> None:
+    assert build_action_fields(
+        operation_advice="风险预警，建议卖出",
+        align_with_score=True,
+    ) == {
+        "action": "sell",
+        "action_label": "卖出",
+    }
+
+    assert build_action_fields(
+        operation_advice="Alert, sell",
+        report_language="en",
+        align_with_score=True,
+    ) == {
+        "action": "sell",
+        "action_label": "Sell",
+    }
+
+    assert build_action_fields(
+        operation_advice="경고, 매도",
+        report_language="ko",
+        align_with_score=True,
+    ) == {
+        "action": "sell",
+        "action_label": "매도",
+    }
+
+    assert build_action_fields(
+        operation_advice="경고, 비중축소",
+        report_language="ko",
+        align_with_score=True,
+    ) == {
+        "action": "reduce",
+        "action_label": "비중축소",
+    }
+
+
 @pytest.mark.parametrize(
     "advice",
     [
@@ -366,3 +425,149 @@ def test_build_action_fields_keeps_neutral_score_conflict_when_guardrail_is_expl
         guardrail_reason="等待回踩确认",
         align_with_score=True,
     ) == {"action": "watch", "action_label": "观望"}
+
+
+def test_display_operation_advice_aligns_with_score_without_guardrail() -> None:
+    assert display_operation_advice(
+        operation_advice="持有",
+        sentiment_score=72,
+        report_language="zh",
+    ) == "买入"
+
+
+def test_display_operation_advice_keeps_guardrailed_neutral_advice() -> None:
+    assert display_operation_advice(
+        operation_advice="持有",
+        sentiment_score=72,
+        guardrail_reason="等待回踩确认",
+        report_language="zh",
+    ) == "持有"
+
+
+def test_display_decision_type_for_result_uses_display_action_bucket() -> None:
+    class Result:
+        operation_advice = "持有"
+        sentiment_score = 72
+        report_language = "zh"
+        action = None
+        action_label = None
+        dashboard = None
+
+    assert display_decision_type_for_result(Result()) == "buy"
+
+
+@pytest.mark.parametrize("decision_type, expected", [("buy", "buy"), ("sell", "sell")])
+def test_display_decision_type_for_result_falls_back_to_decision_type(
+    decision_type: str,
+    expected: str,
+) -> None:
+    class Result:
+        operation_advice = "未知波动信号"
+        sentiment_score = 72
+        report_language = "zh"
+        action = None
+        action_label = None
+        dashboard = None
+
+    setattr(Result, "decision_type", decision_type)
+
+    assert display_decision_type_for_result(Result()) == expected
+
+
+def test_display_action_fields_falls_back_to_action_label_when_explicit_action_is_blank() -> None:
+    assert display_action_fields(
+        operation_advice="持有",
+        explicit_action="",
+        action_label="回避",
+        sentiment_score=72,
+        report_language="zh",
+    ) == {
+        "action": "avoid",
+        "action_label": "回避",
+    }
+
+
+@pytest.mark.parametrize("explicit_action", ["unknown", "N/A"])
+def test_display_action_fields_falls_back_to_action_label_when_explicit_action_is_invalid(
+    explicit_action: str,
+) -> None:
+    assert display_action_fields(
+        operation_advice="持有",
+        explicit_action=explicit_action,
+        action_label="回避",
+        sentiment_score=72,
+        report_language="zh",
+    ) == {
+        "action": "avoid",
+        "action_label": "回避",
+    }
+
+
+def test_display_action_fields_for_result_falls_back_when_result_action_is_blank() -> None:
+    class Result:
+        operation_advice = "持有"
+        action = ""
+        action_label = "回避"
+        decision_type = "hold"
+        report_language = "zh"
+        report_type = None
+        sentiment_score = 72
+        dashboard = None
+        guardrail_reason = None
+
+    assert display_action_fields_for_result(Result(), report_language="zh") == {
+        "action": "avoid",
+        "action_label": "回避",
+    }
+
+
+def test_extract_decision_guardrail_reason_reads_dashboard_sources() -> None:
+    assert extract_decision_guardrail_reason(
+        {
+            "dashboard": {
+                "decision_score_calibration": {
+                    "guardrail_reason": "wait for support confirmation",
+                }
+            }
+        }
+    ) == "wait for support confirmation"
+
+    assert extract_decision_guardrail_reason(
+        {
+            "dashboard": {
+                "decision_stability": {
+                    "applied": True,
+                    "reason": "capital flow is unavailable",
+                }
+            }
+        }
+    ) == "capital flow is unavailable"
+
+
+def test_extract_decision_guardrail_reason_ignores_unapplied_stability_reason() -> None:
+    assert (
+        extract_decision_guardrail_reason(
+            {
+                "dashboard": {
+                    "decision_stability": {
+                        "applied": False,
+                        "reason": "资金流不可用，未使用资金流校准",
+                    }
+                }
+            }
+        )
+        is None
+    )
+    assert (
+        extract_decision_guardrail_reason(
+            {
+                "dashboard": {
+                    "decision_stability": {
+                        "applied": False,
+                        "downgrade_reason": "资金流仍偏弱，暂按观望处理",
+                    }
+                }
+            }
+        )
+        is None
+    )

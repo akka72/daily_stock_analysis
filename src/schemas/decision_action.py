@@ -11,8 +11,12 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, Literal, Optional, TypedDict, get_args
 
-from src.report_language import normalize_report_language
-from src.schemas.decision_scale import action_for_score, score_action_conflicts_without_guardrail
+from src.report_language import localize_operation_advice, normalize_report_language
+from src.schemas.decision_scale import (
+    action_for_score,
+    extract_decision_guardrail_reason,
+    score_action_conflicts_without_guardrail,
+)
 
 DecisionAction = Literal["buy", "add", "hold", "reduce", "sell", "watch", "avoid", "alert"]
 
@@ -26,17 +30,24 @@ _ACTION_VALUES = set(get_args(DecisionAction))
 _NON_STOCK_REPORT_TYPES = {"market_review"}
 
 _ACTION_LABELS: Dict[str, Dict[str, str]] = {
-    "buy": {"zh": "买入", "en": "Buy"},
-    "add": {"zh": "加仓", "en": "Add"},
-    "hold": {"zh": "持有", "en": "Hold"},
-    "reduce": {"zh": "减仓", "en": "Reduce"},
-    "sell": {"zh": "卖出", "en": "Sell"},
-    "watch": {"zh": "观望", "en": "Watch"},
-    "avoid": {"zh": "回避", "en": "Avoid"},
-    "alert": {"zh": "预警", "en": "Alert"},
+    "buy": {"zh": "买入", "en": "Buy", "ko": "매수"},
+    "add": {"zh": "加仓", "en": "Add", "ko": "추가 매수"},
+    "hold": {"zh": "持有", "en": "Hold", "ko": "보유"},
+    "reduce": {"zh": "减仓", "en": "Reduce", "ko": "비중축소"},
+    "sell": {"zh": "卖出", "en": "Sell", "ko": "매도"},
+    "watch": {"zh": "观望", "en": "Watch", "ko": "관망"},
+    "avoid": {"zh": "回避", "en": "Avoid", "ko": "회피"},
+    "alert": {"zh": "预警", "en": "Alert", "ko": "경고"},
+}
+
+_LOCALIZED_EXPLICIT_ALIASES: Dict[str, DecisionAction] = {
+    label: action
+    for action, labels in _ACTION_LABELS.items()
+    for label in labels.values()
 }
 
 _EXPLICIT_ALIASES: Dict[str, DecisionAction] = {
+    **_LOCALIZED_EXPLICIT_ALIASES,
     "strong buy": "buy",
     "accumulate": "add",
     "trim": "reduce",
@@ -107,6 +118,8 @@ _ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
 _NEGATED_ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
     "avoid": (
         "暂不买入",
+        "不建议买入",
+        "避免买入",
         "不要买入",
         "不宜买入",
         "先不买入",
@@ -229,6 +242,7 @@ _ENGLISH_NEGATED_ACTION_TERMS: Dict[DecisionAction, tuple[str, ...]] = {
 _ENGLISH_AVOIDED_HOLD_ACTION_TERMS = ("adding", "accumulating", "selling", "reducing", "trimming")
 _ENGLISH_DEFERRED_ACTION_TERMS = ("buy", "add", "accumulate", "sell", "reduce", "trim")
 _FINANCIAL_COMPOUND_SENTINEL = "financialcompound"
+_ACTION_SEGMENT_SPLIT_RE = re.compile(r"[/,，;；、|]+")
 
 
 def _normalize_key(value: Any) -> str:
@@ -299,6 +313,18 @@ def _explicit_action(value: Any) -> Optional[DecisionAction]:
     return _EXPLICIT_ALIASES.get(normalized)
 
 
+def _explicit_segment_actions(value: Any) -> set[DecisionAction]:
+    text = str(value or "").strip()
+    if not text:
+        return set()
+    actions: set[DecisionAction] = set()
+    for segment in _ACTION_SEGMENT_SPLIT_RE.split(text):
+        action = _explicit_action(segment)
+        if action:
+            actions.add(action)
+    return actions
+
+
 def normalize_decision_action(value: Any) -> Optional[DecisionAction]:
     """Return a unique eight-state action for explicit values or clear text.
 
@@ -317,6 +343,17 @@ def normalize_decision_action(value: Any) -> Optional[DecisionAction]:
     if _has_english_deferred_action(text):
         return None
 
+    segmented_actions = _explicit_segment_actions(value)
+    segmented_guard_actions = segmented_actions & set(_GUARD_ACTIONS)
+    segmented_trade_actions = segmented_actions - set(_GUARD_ACTIONS)
+    if segmented_guard_actions:
+        if len(segmented_trade_actions) == 1:
+            return next(iter(segmented_trade_actions))
+        if len(segmented_trade_actions) > 1:
+            if segmented_trade_actions <= {"hold", "watch"}:
+                return "watch" if "watch" in segmented_trade_actions else "hold"
+            return None
+
     negated_matches: set[DecisionAction] = set()
     if _has_english_avoided_hold_action(text):
         negated_matches.add("hold")
@@ -324,19 +361,11 @@ def normalize_decision_action(value: Any) -> Optional[DecisionAction]:
     for action, phrases in _NEGATED_ACTION_PHRASES.items():
         if any(_word_or_substring_match(text, phrase) for phrase in phrases):
             negated_matches.add(action)
-    if len(negated_matches) == 1:
-        return next(iter(negated_matches))
-    if len(negated_matches) > 1:
-        return None
 
     guard_matches: set[DecisionAction] = set()
     for action in _GUARD_ACTIONS:
         if any(_word_or_substring_match(text, phrase) for phrase in _ACTION_PHRASES[action]):
             guard_matches.add(action)
-    if len(guard_matches) == 1:
-        return next(iter(guard_matches))
-    if len(guard_matches) > 1:
-        return None
 
     matches: set[DecisionAction] = set()
     for action, phrases in _ACTION_PHRASES.items():
@@ -345,10 +374,19 @@ def normalize_decision_action(value: Any) -> Optional[DecisionAction]:
         if any(_word_or_substring_match(text, phrase) for phrase in phrases):
             matches.add(action)
 
+    if len(negated_matches) == 1:
+        return None if "alert" in guard_matches else next(iter(negated_matches))
+    if len(negated_matches) > 1:
+        return None
+
     if len(matches) == 1:
         return next(iter(matches))
     if matches and matches <= {"hold", "watch"}:
         return "watch" if "watch" in matches else "hold"
+    if len(guard_matches) == 1:
+        return next(iter(guard_matches))
+    if len(guard_matches) > 1:
+        return None
     return None
 
 
@@ -395,3 +433,157 @@ def build_action_fields(
         "action": action,
         "action_label": localize_action_label(action, report_language) if action else None,
     }
+
+
+def _result_guardrail_reason(result: Any) -> Optional[str]:
+    return extract_decision_guardrail_reason(
+        {
+            "guardrail_reason": getattr(result, "guardrail_reason", None),
+            "downgrade_reason": getattr(result, "downgrade_reason", None),
+            "dashboard": getattr(result, "dashboard", None),
+            "metadata": getattr(result, "metadata", None),
+        }
+    )
+
+
+def display_action_fields(
+    *,
+    operation_advice: Any = None,
+    explicit_action: Any = None,
+    action_label: Any = None,
+    report_type: Any = None,
+    report_language: Optional[str] = "zh",
+    sentiment_score: Any = None,
+    guardrail_reason: Any = None,
+) -> DecisionActionFields:
+    """Return action fields aligned to the canonical score/action display contract."""
+
+    action_source = explicit_action
+    if normalize_decision_action(action_source) is None and str(action_label or "").strip():
+        action_source = action_label
+
+    return build_action_fields(
+        operation_advice=operation_advice,
+        explicit_action=action_source,
+        report_type=report_type,
+        report_language=report_language,
+        sentiment_score=sentiment_score,
+        guardrail_reason=guardrail_reason,
+        align_with_score=True,
+    )
+
+
+def display_operation_advice(
+    *,
+    operation_advice: Any = None,
+    explicit_action: Any = None,
+    action_label: Any = None,
+    report_type: Any = None,
+    report_language: Optional[str] = "zh",
+    sentiment_score: Any = None,
+    guardrail_reason: Any = None,
+) -> str:
+    """Return the public display advice using the canonical score/action scale."""
+
+    fields = display_action_fields(
+        operation_advice=operation_advice,
+        explicit_action=explicit_action,
+        action_label=action_label,
+        report_type=report_type,
+        report_language=report_language,
+        sentiment_score=sentiment_score,
+        guardrail_reason=guardrail_reason,
+    )
+    if fields["action_label"]:
+        return fields["action_label"]
+    return localize_operation_advice(operation_advice, report_language)
+
+
+def _display_result_kwargs(
+    result: Any,
+    *,
+    report_language: Optional[str] = None,
+    report_type: Any = None,
+) -> dict[str, Any]:
+    language = report_language or getattr(result, "report_language", "zh")
+    return {
+        "operation_advice": getattr(result, "operation_advice", None),
+        "explicit_action": getattr(result, "action", None),
+        "action_label": getattr(result, "action_label", None),
+        "report_type": report_type or getattr(result, "report_type", None),
+        "report_language": language,
+        "sentiment_score": getattr(result, "sentiment_score", None),
+        "guardrail_reason": _result_guardrail_reason(result),
+    }
+
+
+def display_operation_advice_for_result(
+    result: Any,
+    *,
+    report_language: Optional[str] = None,
+    report_type: Any = None,
+) -> str:
+    """Return the report-facing operation advice for an AnalysisResult-like object."""
+
+    return display_operation_advice(
+        **_display_result_kwargs(
+            result,
+            report_language=report_language,
+            report_type=report_type,
+        )
+    )
+
+
+def display_action_fields_for_result(
+    result: Any,
+    *,
+    report_language: Optional[str] = None,
+    report_type: Any = None,
+) -> DecisionActionFields:
+    """Return display action fields for an AnalysisResult-like object."""
+
+    return display_action_fields(
+        **_display_result_kwargs(
+            result,
+            report_language=report_language,
+            report_type=report_type,
+        )
+    )
+
+
+def decision_type_for_action(action: Any) -> str:
+    normalized = _explicit_action(action)
+    if normalized in {"buy", "add"}:
+        return "buy"
+    if normalized in {"reduce", "sell"}:
+        return "sell"
+    return "hold"
+
+
+def _legacy_decision_type_for_result(result: Any) -> Optional[str]:
+    normalized = str(getattr(result, "decision_type", "") or "").strip().lower()
+    if normalized in {"buy", "hold", "sell"}:
+        return normalized
+    if normalized == "strong_buy":
+        return "buy"
+    if normalized == "strong_sell":
+        return "sell"
+    return None
+
+
+def display_decision_type_for_result(
+    result: Any,
+    *,
+    report_language: Optional[str] = None,
+    report_type: Any = None,
+) -> str:
+    """Return the three-bucket display decision type used by report summaries."""
+
+    fields = display_action_fields_for_result(
+        result,
+        report_language=report_language,
+        report_type=report_type,
+    )
+    if fields["action"] is not None:
+        return decision_type_for_action(fields["action"])
+    return _legacy_decision_type_for_result(result) or "hold"

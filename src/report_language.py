@@ -55,6 +55,12 @@ _OPERATION_ADVICE_CANONICAL_MAP = {
     "强烈卖出": "strong_sell",
     "strong sell": "strong_sell",
     "strong_sell": "strong_sell",
+    "回避": "avoid",
+    "avoid": "avoid",
+    "规避": "avoid",
+    "预警": "alert",
+    "风险预警": "alert",
+    "alert": "alert",
     "적극 매수": "strong_buy",
     "매수": "buy",
     "보유": "hold",
@@ -63,6 +69,8 @@ _OPERATION_ADVICE_CANONICAL_MAP = {
     "비중축소": "reduce",
     "매도": "sell",
     "적극 매도": "strong_sell",
+    "회피": "avoid",
+    "경고": "alert",
 }
 
 _OPERATION_ADVICE_TRANSLATIONS = {
@@ -73,6 +81,8 @@ _OPERATION_ADVICE_TRANSLATIONS = {
     "reduce": {"zh": "减仓", "en": "Reduce", "ko": "비중축소"},
     "sell": {"zh": "卖出", "en": "Sell", "ko": "매도"},
     "strong_sell": {"zh": "强烈卖出", "en": "Strong Sell", "ko": "적극 매도"},
+    "avoid": {"zh": "回避", "en": "Avoid", "ko": "회피"},
+    "alert": {"zh": "预警", "en": "Alert", "ko": "경고"},
 }
 
 _TREND_PREDICTION_CANONICAL_MAP = {
@@ -919,12 +929,27 @@ def get_bias_status_emoji(value: Any) -> str:
 
 def infer_decision_type_from_advice(value: Any, default: str = "hold") -> str:
     """Infer buy/hold/sell from human-readable operation advice."""
+
+    try:
+        from src.schemas.decision_action import normalize_decision_action
+    except Exception:  # pragma: no cover
+        normalize_decision_action = None
+
+    if normalize_decision_action is not None:
+        action = normalize_decision_action(value)
+        if action == "buy" or action == "add":
+            return "buy"
+        if action in {"reduce", "sell"}:
+            return "sell"
+        if action in {"hold", "watch", "avoid", "alert"}:
+            return "hold"
+
     canonical = _canonicalize_lookup_value(value, _OPERATION_ADVICE_CANONICAL_MAP)
     if canonical in {"strong_buy", "buy"}:
         return "buy"
     if canonical in {"reduce", "sell", "strong_sell"}:
         return "sell"
-    if canonical in {"hold", "watch"}:
+    if canonical in {"hold", "watch", "avoid", "alert"}:
         return "hold"
 
     normalized_text = _normalize_lookup_key(value)
@@ -943,7 +968,7 @@ def infer_decision_type_from_advice(value: Any, default: str = "hold") -> str:
         return "buy"
     if best_canonical in {"reduce", "sell", "strong_sell"}:
         return "sell"
-    if best_canonical in {"hold", "watch"}:
+    if best_canonical in {"hold", "watch", "avoid", "alert"}:
         return "hold"
 
     return default
@@ -952,10 +977,34 @@ def infer_decision_type_from_advice(value: Any, default: str = "hold") -> str:
 def get_signal_level(advice: Any, score: Any, language: Optional[str]) -> tuple[str, str, str]:
     """Return localized signal text, emoji, and stable color tag."""
     normalized_language = normalize_report_language(language)
-    canonical = _canonicalize_lookup_value(advice, _OPERATION_ADVICE_CANONICAL_MAP)
+    canonical: Optional[str]
+    try:
+        from src.schemas.decision_action import normalize_decision_action
+    except Exception:  # pragma: no cover
+        normalize_decision_action = None
+
+    if normalize_decision_action is not None:
+        action = normalize_decision_action(advice)
+        if action == "add":
+            canonical = "buy"
+        elif action in {"hold", "watch", "reduce", "sell", "avoid", "alert", "buy"}:
+            canonical = action
+        else:
+            canonical = _canonicalize_lookup_value(advice, _OPERATION_ADVICE_CANONICAL_MAP)
+    else:
+        canonical = _canonicalize_lookup_value(advice, _OPERATION_ADVICE_CANONICAL_MAP)
+
+    try:
+        numeric_score = int(float(score))
+    except (TypeError, ValueError):
+        numeric_score = 50
+    score_signal = signal_key_for_score(numeric_score)
+
     if canonical == "strong_buy":
         return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
     if canonical == "buy":
+        if score_signal == "strong_buy":
+            return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
         return (_OPERATION_ADVICE_TRANSLATIONS["buy"][normalized_language], "🟢", "buy")
     if canonical == "hold":
         return (_OPERATION_ADVICE_TRANSLATIONS["hold"][normalized_language], "🟡", "hold")
@@ -965,13 +1014,9 @@ def get_signal_level(advice: Any, score: Any, language: Optional[str]) -> tuple[
         return (_OPERATION_ADVICE_TRANSLATIONS["reduce"][normalized_language], "🟠", "reduce")
     if canonical in {"sell", "strong_sell"}:
         return (_OPERATION_ADVICE_TRANSLATIONS["sell"][normalized_language], "🔴", "sell")
+    if canonical in {"avoid", "alert"}:
+        return (_OPERATION_ADVICE_TRANSLATIONS[canonical][normalized_language], "🟡", "hold")
 
-    try:
-        numeric_score = int(float(score))
-    except (TypeError, ValueError):
-        numeric_score = 50
-
-    score_signal = signal_key_for_score(numeric_score)
     if score_signal == "strong_buy":
         return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
     if score_signal == "buy":

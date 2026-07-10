@@ -825,6 +825,133 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertEqual(response.items[0].action, "buy")
         self.assertEqual(response.items[0].action_label, "Buy")
 
+    def test_stock_bar_item_prefers_raw_action_label_over_score_alignment(self) -> None:
+        if get_stock_bar is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        result = self._build_result()
+        result.operation_advice = "持有"
+        result.action = None
+        result.action_label = "回避"
+        result.sentiment_score = 84
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_stock_bar_action_label",
+            report_type="detailed",
+            news_content="个股正文",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        response = get_stock_bar(
+            start_date=None,
+            end_date=None,
+            limit=10,
+            db_manager=self.db,
+        )
+
+        self.assertEqual(len(response.items), 1)
+        self.assertEqual(response.items[0].action, "avoid")
+        self.assertEqual(response.items[0].action_label, "回避")
+
+    def test_stock_bar_item_prefers_action_label_when_raw_action_is_invalid(self) -> None:
+        if get_stock_bar is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        result = self._build_result()
+        result.operation_advice = "持有"
+        result.action = "unknown"
+        result.action_label = "回避"
+        result.sentiment_score = 84
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_stock_bar_invalid_action",
+            report_type="detailed",
+            news_content="个股正文",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        response = get_stock_bar(
+            start_date=None,
+            end_date=None,
+            limit=10,
+            db_manager=self.db,
+        )
+
+        self.assertEqual(len(response.items), 1)
+        self.assertEqual(response.items[0].action, "avoid")
+        self.assertEqual(response.items[0].action_label, "回避")
+
+    def test_history_list_and_detail_use_raw_label_when_action_is_invalid(self) -> None:
+        result = self._build_result()
+        result.operation_advice = "持有"
+        result.action = "unknown"
+        result.action_label = "回避"
+        result.sentiment_score = 84
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_history_invalid_action_label",
+            report_type="detailed",
+            news_content="个股正文",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        service = HistoryService(self.db)
+        listing = service.get_history_list(page=1, limit=10)
+        detail = service.resolve_and_get_detail("query_history_invalid_action_label")
+
+        self.assertEqual(listing["items"][0]["action"], "avoid")
+        self.assertEqual(listing["items"][0]["action_label"], "回避")
+        self.assertIsNotNone(detail)
+        self.assertEqual(detail["action"], "avoid")
+        self.assertEqual(detail["action_label"], "回避")
+
+    def test_stock_bar_item_keeps_guardrailed_advice_from_dashboard_when_aligning(self) -> None:
+        if get_stock_bar is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        result = self._build_result()
+        result.operation_advice = "持有"
+        result.sentiment_score = 84
+        result.dashboard = {
+            "decision_stability": {
+                "applied": True,
+                "reason": "资金流不稳定，暂缓进场",
+            }
+        }
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_stock_bar_guardrail",
+            report_type="detailed",
+            news_content="个股正文",
+            context_snapshot={
+                "market_phase_summary": {"market": "cn", "phase": "intraday"},
+            },
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        response = get_stock_bar(
+            start_date=None,
+            end_date=None,
+            limit=10,
+            db_manager=self.db,
+        )
+
+        self.assertEqual(len(response.items), 1)
+        self.assertEqual(response.items[0].sentiment_score, 84)
+        self.assertEqual(response.items[0].action, "hold")
+        self.assertEqual(response.items[0].action_label, "持有")
+
     def test_history_detail_uses_service_resolved_action_fields(self) -> None:
         if get_history_detail is None:
             self.skipTest("fastapi is not installed in this test environment")
@@ -1674,6 +1801,120 @@ class AnalysisHistoryTestCase(unittest.TestCase):
         self.assertIsNotNone(markdown)
         self.assertIn("**筹码**: 筹码分布未启用或数据源暂不可用，未纳入筹码判断。", markdown)
         self.assertEqual(markdown.count("数据缺失，无法判断"), 0)
+
+    def test_history_markdown_aligns_display_advice_with_score(self) -> None:
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=70,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但旧建议仍为持有",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但旧建议仍为持有"},
+            },
+        )
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_display_advice_score_aligned_001",
+            report_type="full",
+            news_content="news",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        with self.db.get_session() as session:
+            row = session.query(AnalysisHistory).filter(
+                AnalysisHistory.query_id == "query_display_advice_score_aligned_001"
+            ).first()
+            if row is None:
+                self.fail("未找到保存的历史记录")
+            record_id = row.id
+
+        markdown = HistoryService(self.db).get_markdown_report(str(record_id))
+
+        self.assertIsNotNone(markdown)
+        self.assertIn("**🟢 买入** | 看多", markdown)
+        self.assertNotIn("**🟡 持有** | 看多", markdown)
+
+    def test_history_markdown_preserves_top_level_guardrail_reason(self) -> None:
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=70,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但有顶层降级原因",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但有顶层降级原因"},
+            },
+        )
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_display_advice_root_guardrail_001",
+            report_type="full",
+            news_content="news",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        with self.db.session_scope() as session:
+            row = session.query(AnalysisHistory).filter(
+                AnalysisHistory.query_id == "query_display_advice_root_guardrail_001"
+            ).first()
+            if row is None:
+                self.fail("未找到保存的历史记录")
+            raw_result = json.loads(row.raw_result)
+            raw_result["guardrail_reason"] = "等待回踩确认"
+            row.raw_result = json.dumps(raw_result, ensure_ascii=False)
+            record_id = row.id
+
+        markdown = HistoryService(self.db).get_markdown_report(str(record_id))
+
+        self.assertIsNotNone(markdown)
+        self.assertIn("**🟡 持有** | 看多", markdown)
+        self.assertNotIn("**🟢 买入** | 看多", markdown)
+
+    def test_history_markdown_aligns_high_score_legacy_advice_to_strong_buy(self) -> None:
+        result = AnalysisResult(
+            code="301308.SZ",
+            name="江波龙",
+            sentiment_score=85,
+            trend_prediction="看多",
+            operation_advice="持有",
+            analysis_summary="高分但旧建议仍为持有",
+            dashboard={
+                "core_conclusion": {"one_sentence": "高分但旧建议仍为持有"},
+            },
+        )
+
+        saved = self.db.save_analysis_history(
+            result=result,
+            query_id="query_display_advice_score_strong_001",
+            report_type="full",
+            news_content="news",
+            context_snapshot=None,
+            save_snapshot=False,
+        )
+        self.assertGreater(saved, 0)
+
+        with self.db.get_session() as session:
+            row = session.query(AnalysisHistory).filter(
+                AnalysisHistory.query_id == "query_display_advice_score_strong_001"
+            ).first()
+            if row is None:
+                self.fail("未找到保存的历史记录")
+            record_id = row.id
+
+        markdown = HistoryService(self.db).get_markdown_report(str(record_id))
+
+        self.assertIsNotNone(markdown)
+        self.assertIn("**💚 强烈买入** | 看多", markdown)
+        self.assertNotIn("**🟢 买入** | 看多", markdown)
 
     def test_history_detail_returns_persisted_market_review_report(self) -> None:
         """Market review detail should surface the saved recap content for Web history clicks."""

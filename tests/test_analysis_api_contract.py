@@ -651,6 +651,121 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         self.assertEqual(status.result.report["summary"]["action"], "watch")
         self.assertEqual(status.result.report["summary"]["action_label"], "观望")
 
+    def test_get_analysis_status_prefers_action_label_when_raw_action_is_invalid(self) -> None:
+        if get_analysis_status is None or analysis_endpoint_module is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        created_at = datetime(2026, 5, 21, 17, 40, 0)
+        queue = MagicMock()
+        queue.get_task.return_value = SimpleNamespace(
+            task_id="task-queue-invalid-action-label",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            status=analysis_endpoint_module.TaskStatusEnum.COMPLETED,
+            progress=100,
+            result={
+                "stock_code": "600519",
+                "stock_name": "贵州茅台",
+                "report": {
+                    "meta": {
+                        "query_id": "task-queue-invalid-action-label",
+                        "stock_code": "600519",
+                        "report_type": "detailed",
+                        "report_language": "zh",
+                    },
+                    "summary": {
+                        "analysis_summary": "summary",
+                        "sentiment_score": 72,
+                        "action_label": "回避",
+                    },
+                    "details": {
+                        "raw_result": {
+                            "action": "invalid_action",
+                            "action_label": "回避",
+                        },
+                    },
+                },
+            },
+            error=None,
+            original_query=None,
+            selection_source=None,
+            analysis_phase="auto",
+            created_at=created_at,
+            completed_at=datetime(2026, 5, 21, 17, 45, 0),
+        )
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue), \
+             patch(
+                 "api.v1.endpoints.analysis._load_sync_fundamental_sources",
+                 return_value=({}, None),
+             ):
+            status = get_analysis_status("task-queue-invalid-action-label")
+
+        self.assertEqual(status.status, "completed")
+        self.assertIsNotNone(status.result)
+        self.assertEqual(status.result.report["summary"]["action"], "avoid")
+        self.assertEqual(status.result.report["summary"]["action_label"], "回避")
+
+    def test_get_analysis_status_prefers_legacy_action_when_dashboard_guardrail_reason_exists(self) -> None:
+        if get_analysis_status is None or analysis_endpoint_module is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        created_at = datetime(2026, 5, 21, 17, 40, 0)
+        queue = MagicMock()
+        queue.get_task.return_value = SimpleNamespace(
+            task_id="task-queue-dashboard-guardrail",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            status=analysis_endpoint_module.TaskStatusEnum.COMPLETED,
+            progress=100,
+            result={
+                "stock_code": "600519",
+                "stock_name": "贵州茅台",
+                "report": {
+                    "meta": {
+                        "query_id": "task-queue-dashboard-guardrail",
+                        "stock_code": "600519",
+                        "report_type": "detailed",
+                        "report_language": "zh",
+                    },
+                    "summary": {
+                        "analysis_summary": "summary",
+                        "operation_advice": "持有",
+                        "sentiment_score": 72,
+                    },
+                    "details": {
+                        "raw_result": {
+                            "operation_advice": "持有",
+                            "dashboard": {
+                                "decision_stability": {
+                                    "applied": True,
+                                    "reason": "宏观事件干扰",
+                                }
+                            },
+                        },
+                    },
+                },
+            },
+            error=None,
+            original_query=None,
+            selection_source=None,
+            analysis_phase="auto",
+            created_at=created_at,
+            completed_at=datetime(2026, 5, 21, 17, 45, 0),
+        )
+
+        with patch("api.v1.endpoints.analysis.get_task_queue", return_value=queue), \
+             patch(
+                 "api.v1.endpoints.analysis._load_sync_fundamental_sources",
+                 return_value=({}, None),
+             ):
+            status = get_analysis_status("task-queue-dashboard-guardrail")
+
+        self.assertEqual(status.status, "completed")
+        self.assertIsNotNone(status.result)
+        self.assertEqual(status.result.report["summary"]["action"], "hold")
+        self.assertEqual(status.result.report["summary"]["action_label"], "持有")
+
     def test_get_analysis_status_preserves_zero_sentiment_score_when_aligning_action(self) -> None:
         if get_analysis_status is None or analysis_endpoint_module is None:
             self.skipTest("analysis endpoint helpers unavailable in this environment")
@@ -1411,6 +1526,40 @@ class AnalysisApiContractTestCase(unittest.TestCase):
 
         self.assertEqual(report.summary.action, "buy")
         self.assertEqual(report.summary.action_label, "买入")
+
+    def test_build_analysis_report_preserves_legacy_action_with_dashboard_guardrail_reason(self) -> None:
+        if _build_analysis_report is None:
+            self.skipTest("analysis endpoint helpers unavailable in this environment")
+
+        report = _build_analysis_report(
+            report_data={
+                "meta": {"report_type": "detailed", "report_language": "zh"},
+                "summary": {
+                    "analysis_summary": "等待确认",
+                    "operation_advice": "持有",
+                    "sentiment_score": 72,
+                },
+                "strategy": {},
+                "details": {
+                    "raw_result": {
+                        "operation_advice": "持有",
+                        "dashboard": {
+                            "decision_score_calibration": {
+                                "guardrail_reason": "短线风险上升",
+                            }
+                        },
+                    },
+                },
+            },
+            query_id="q3",
+            stock_code="600519",
+            stock_name="贵州茅台",
+            context_snapshot=None,
+            fallback_fundamental_payload=None,
+        )
+
+        self.assertEqual(report.summary.action, "hold")
+        self.assertEqual(report.summary.action_label, "持有")
 
     def test_build_analysis_report_reads_decision_action_from_raw_result(self) -> None:
         if _build_analysis_report is None:
