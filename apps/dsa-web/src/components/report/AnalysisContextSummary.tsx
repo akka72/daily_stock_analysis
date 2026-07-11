@@ -209,12 +209,6 @@ const MISSING_REASON_LABELS: Record<ReportLanguage, Record<string, string>> = {
   },
 };
 
-const NEWS_WITHOUT_INPUT_DETAILS: Record<ReportLanguage, string> = {
-  zh: '新闻未进入本次分析；页面中的相关资讯来自补充检索或历史记录，不代表本次 LLM 已使用新闻；请检查搜索配置、网络或限流后重新分析',
-  en: 'News was not included in this analysis; related news on the page comes from supplemental retrieval or history and was not used by this LLM run; check search configuration, network, or rate limits and rerun',
-  ko: '뉴스가 이번 분석에 포함되지 않았습니다. 화면의 관련 뉴스는 보충 검색 또는 이력에서 왔으며 이번 LLM 실행에 사용되지 않았습니다. 검색 설정, 네트워크 또는 제한을 확인한 후 다시 분석하세요',
-};
-
 const UNKNOWN_REASON_DETAILS: Record<ReportLanguage, string> = {
   zh: '未记录明确原因；请结合状态、来源和告警排查',
   en: 'No specific reason was recorded; review the status, source, and warnings',
@@ -303,13 +297,10 @@ const formatMissingReason = (
   reason: string,
   language: ReportLanguage,
   status: AnalysisContextPackBlockStatus,
-  useSupplementalNewsDetail: boolean,
 ): string => {
-  const detail = useSupplementalNewsDetail && reason === 'news_context_missing'
-    ? NEWS_WITHOUT_INPUT_DETAILS[language]
-    : MISSING_REASON_LABELS[language][reason]
-      || STATUS_FALLBACK_GUIDANCE[language][status]
-      || UNKNOWN_REASON_DETAILS[language];
+  const detail = MISSING_REASON_LABELS[language][reason]
+    || STATUS_FALLBACK_GUIDANCE[language][status]
+    || UNKNOWN_REASON_DETAILS[language];
   return `${detail} (${TEXT[language].diagnosticCode}: ${reason})`;
 };
 
@@ -449,15 +440,12 @@ export const AnalysisContextSummary: React.FC<AnalysisContextSummaryProps> = ({
             {overview.blocks.map((block) => {
               const style = STATUS_STYLE[block.status] || STATUS_STYLE.missing;
               const hasMissingReasons = Boolean(block.missingReasons?.length);
-              const useSupplementalNewsDetail = block.key === 'news'
-                && (overview.metadata?.newsResultCount || 0) > 0;
               const detail = hasMissingReasons
                 ? block.missingReasons
                   ?.map((reason) => formatMissingReason(
                     reason,
                     reportLanguage,
                     block.status,
-                    useSupplementalNewsDetail,
                   ))
                   .join('; ')
                 : STATUS_FALLBACK_GUIDANCE[reportLanguage][block.status];

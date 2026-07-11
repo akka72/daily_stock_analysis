@@ -104,8 +104,9 @@ describe('AnalysisContextSummary', () => {
     expect(screen.getByText('数据限制:')).toBeInTheDocument();
     expect(screen.getByText(/基本面：抓取失败/)).toBeInTheDocument();
     expect(screen.getByText(/news_provider_timeout/)).toBeInTheDocument();
-    expect(screen.getByText(/说明: 新闻未进入本次分析；页面中的相关资讯来自补充检索或历史记录/)).toBeInTheDocument();
-    expect(screen.getByText(/不代表本次 LLM 已使用新闻；请检查搜索配置、网络或限流后重新分析 \(诊断码: news_context_missing\)/)).toBeInTheDocument();
+    expect(screen.getByText(/说明: 新闻未进入本次分析，结论未使用新闻上下文；请检查搜索配置、网络或限流后重新分析/)).toBeInTheDocument();
+    expect(screen.getByText(/诊断码: news_context_missing/)).toBeInTheDocument();
+    expect(screen.queryByText(/页面中的相关资讯来自补充检索或历史记录/)).not.toBeInTheDocument();
     expect(screen.getByText('来源: 未记录输入来源')).toBeInTheDocument();
     expect(screen.queryByText(/^处理:/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^范围:/)).not.toBeInTheDocument();
@@ -135,7 +136,7 @@ describe('AnalysisContextSummary', () => {
 
     expect(screen.getByText('Data Limitations:')).toBeInTheDocument();
     expect(screen.getByText(/fundamentals: Fetch failed/)).toBeInTheDocument();
-    expect(screen.getByText(/Details: News was not included in this analysis; related news on the page comes from supplemental retrieval or history/)).toBeInTheDocument();
+    expect(screen.getByText(/Details: News was not included, so the conclusion did not use news context/)).toBeInTheDocument();
     expect(screen.getByText(/Diagnostic code: news_context_missing/)).toBeInTheDocument();
     expect(screen.queryByText(/^Action:/)).not.toBeInTheDocument();
   });
@@ -406,6 +407,9 @@ describe('ReportSummary analysis context placement', () => {
     expect(news.compareDocumentPosition(contextSummary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(contextSummary.compareDocumentPosition(diagnostics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(diagnostics.compareDocumentPosition(traceability) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(contextSummary).getAllByText('输入数据块')[0]);
+    expect(within(contextSummary).getByText(/说明: 新闻未进入本次分析，结论未使用新闻上下文/)).toBeInTheDocument();
+    expect(within(contextSummary).queryByText(/页面中的相关资讯来自补充检索或历史记录/)).not.toBeInTheDocument();
     expect(screen.queryByText('AI 建议 / 决策信号')).not.toBeInTheDocument();
   });
 });
