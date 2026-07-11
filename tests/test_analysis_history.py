@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,11 +27,12 @@ except ModuleNotFoundError:
 try:
     from fastapi.testclient import TestClient
     from api.app import create_app
-    from api.v1.endpoints.history import get_history_detail, get_stock_bar
+    from api.v1.endpoints.history import get_history_detail, get_history_list, get_stock_bar
 except ModuleNotFoundError:
     TestClient = None
     create_app = None
     get_history_detail = None
+    get_history_list = None
     get_stock_bar = None
 
 from src.config import Config
@@ -152,6 +154,35 @@ class AnalysisHistoryTestCase(unittest.TestCase):
             else:
                 os.environ[key] = value
         self._temp_dir.cleanup()
+
+    def test_history_timestamps_include_server_timezone_offset(self) -> None:
+        serialized = HistoryService._serialize_created_at(datetime(2026, 7, 11, 0, 30))
+
+        self.assertIsNotNone(serialized)
+        self.assertRegex(serialized or "", r"[+-]\d{2}:\d{2}$")
+
+    def test_history_query_failure_is_not_returned_as_an_empty_success(self) -> None:
+        db = MagicMock()
+        db.get_analysis_history_paginated.side_effect = RuntimeError("database unavailable")
+
+        with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+            HistoryService(db).get_history_list(page=1, limit=20)
+
+        if get_history_list is None:
+            self.skipTest("fastapi is not installed in this test environment")
+
+        with self.assertRaises(Exception) as raised:
+            get_history_list(
+                stock_code=None,
+                report_type=None,
+                start_date=None,
+                end_date=None,
+                page=1,
+                limit=20,
+                db_manager=db,
+            )
+
+        self.assertEqual(getattr(raised.exception, "status_code", None), 500)
 
     def _build_result(self) -> AnalysisResult:
         """构造分析结果"""

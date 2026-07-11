@@ -108,11 +108,12 @@ describe('useDashboardLifecycle', () => {
     expect(removeTask).not.toHaveBeenCalled();
   });
 
-  it('refreshes completed task history and removes completed tasks after the grace window', () => {
+  it('refreshes completed task history and removes completed tasks after the grace window', async () => {
     const refreshHistory = vi.fn().mockResolvedValue(undefined);
     const refreshHistoryForCompletedTask = vi.fn().mockResolvedValue(undefined);
     const syncTaskUpdated = vi.fn();
     const removeTask = vi.fn();
+    const onCompletedTaskDataRefreshed = vi.fn();
 
     renderHook(() =>
       useDashboardLifecycle({
@@ -124,6 +125,7 @@ describe('useDashboardLifecycle', () => {
         syncTaskUpdated,
         syncTaskFailed: vi.fn(),
         removeTask,
+        onCompletedTaskDataRefreshed,
         ...defaultMocks,
       }),
     );
@@ -131,8 +133,10 @@ describe('useDashboardLifecycle', () => {
     const taskStreamOptions = vi.mocked(useTaskStream).mock.calls[0]?.[0];
     const completedTask = createTask();
 
-    act(() => {
+    await act(async () => {
       taskStreamOptions?.onTaskCompleted?.(completedTask);
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
     expect(syncTaskUpdated).toHaveBeenCalledWith(completedTask);
@@ -140,10 +144,11 @@ describe('useDashboardLifecycle', () => {
     expect(refreshHistory).not.toHaveBeenCalledWith(true);
     expect(defaultMocks.refreshMarketReviewHistory).toHaveBeenCalledWith(true);
 
+    expect(onCompletedTaskDataRefreshed).toHaveBeenCalledWith(completedTask);
+
     act(() => {
       vi.advanceTimersByTime(2_000);
     });
-
     expect(removeTask).toHaveBeenCalledWith(completedTask.taskId);
   });
 

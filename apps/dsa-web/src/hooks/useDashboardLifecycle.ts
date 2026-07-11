@@ -15,6 +15,7 @@ type UseDashboardLifecycleOptions = {
   syncTaskUpdated: (task: TaskInfo) => void;
   syncTaskFailed: (task: TaskInfo) => void;
   removeTask: (taskId: string) => void;
+  onCompletedTaskDataRefreshed?: (task: TaskInfo) => void;
   enabled?: boolean;
 };
 
@@ -31,6 +32,7 @@ export function useDashboardLifecycle({
   syncTaskUpdated,
   syncTaskFailed,
   removeTask,
+  onCompletedTaskDataRefreshed,
   enabled = true,
 }: UseDashboardLifecycleOptions): void {
   const removalTimeoutsRef = useRef<number[]>([]);
@@ -104,12 +106,13 @@ export function useDashboardLifecycle({
     },
     onTaskCompleted: (task) => {
       syncTaskUpdated(task);
-      if (refreshHistoryForCompletedTask) {
-        void refreshHistoryForCompletedTask(task);
-      } else {
-        void refreshHistory(true);
-      }
-      void refreshStockBar();
+      const historyRefresh = refreshHistoryForCompletedTask
+        ? refreshHistoryForCompletedTask(task)
+        : refreshHistory(true);
+      const stockBarRefresh = refreshStockBar();
+      void Promise.allSettled([historyRefresh, stockBarRefresh]).then(() => {
+        onCompletedTaskDataRefreshed?.(task);
+      });
       void refreshMarketReviewHistory?.(true);
       scheduleTaskRemoval(task.taskId, 2_000);
     },
