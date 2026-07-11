@@ -867,6 +867,7 @@ class Config:
     agent_event_monitor_enabled: bool = False  # Enable periodic event-driven alert checks in schedule mode
     agent_event_monitor_interval_minutes: int = 5  # Polling interval for event monitor background checks
     agent_event_alert_rules_json: str = ""  # JSON array of serialized EventMonitor rules
+    agent_event_monitor_default_rules_enabled: bool = True  # 未配置显式规则的自选股自动套用默认盘中异动规则(放量/大单异动/红绿反转)
 
     # === 通知配置（可同时配置多个，全部推送）===
     
@@ -1821,6 +1822,7 @@ class Config:
                 minimum=1,
             ),
             agent_event_alert_rules_json=os.getenv('AGENT_EVENT_ALERT_RULES_JSON', ''),
+            agent_event_monitor_default_rules_enabled=os.getenv('AGENT_EVENT_MONITOR_DEFAULT_RULES_ENABLED', 'true').lower() == 'true',
             wechat_webhook_url=os.getenv('WECHAT_WEBHOOK_URL'),
             feishu_webhook_url=os.getenv('FEISHU_WEBHOOK_URL'),
             feishu_webhook_secret=os.getenv('FEISHU_WEBHOOK_SECRET'),

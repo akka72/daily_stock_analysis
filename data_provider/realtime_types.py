@@ -159,6 +159,11 @@ class UnifiedRealtimeQuote:
     change_60d: Optional[float] = None      # 60日涨跌幅(%)
     high_52w: Optional[float] = None        # 52周最高
     low_52w: Optional[float] = None         # 52周最低
+
+    # === 资金流向指标 ===
+    main_net_inflow: Optional[float] = None        # 主力资金净流入（元）
+    super_large_net_inflow: Optional[float] = None # 超大单资金净流入（元）
+    large_net_inflow: Optional[float] = None       # 大单资金净流入（元）
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典（过滤 None 值）"""
@@ -175,7 +180,8 @@ class UnifiedRealtimeQuote:
             'volume_ratio', 'turnover_rate', 'amplitude',
             'open_price', 'high', 'low', 'pre_close',
             'pe_ratio', 'pb_ratio', 'total_mv', 'circ_mv',
-            'change_60d', 'high_52w', 'low_52w'
+            'change_60d', 'high_52w', 'low_52w',
+            'main_net_inflow', 'super_large_net_inflow', 'large_net_inflow'
         ]
         for f in optional_fields:
             val = getattr(self, f, None)

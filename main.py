@@ -331,6 +331,18 @@ def parse_arguments() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        '--monitor',
+        action='store_true',
+        help='启动盘中高频实时盯盘监控（在前台手动直接运行）'
+    )
+
+    parser.add_argument(
+        '--replay',
+        action='store_true',
+        help='强制运行今日历史分钟数据回放模拟测试（自动从 9:30 开始）'
+    )
+
+    parser.add_argument(
         '--no-run-immediately',
         action='store_true',
         help='定时任务启动时不立即执行一次'
@@ -1359,6 +1371,14 @@ def main() -> int:
         if not prepare_webui_frontend_assets():
             logger.warning("前端静态资源未就绪，继续启动 FastAPI 服务（Web 页面可能不可用）")
         try:
+            if getattr(config, 'agent_event_monitor_enabled', False) and not args.serve_only:
+                try:
+                    logger.info("[盯盘监控] 启动盘中高频实时盯盘与异步 AI 诊断守护进程 (WebUI 模式)...")
+                    from src.monitor import start_monitor_thread
+                    start_monitor_thread(config)
+                except Exception as e:
+                    logger.error(f"[盯盘监控] 启动高频守护进程失败: {e}")
+
             start_api_server(host=args.host, port=args.port, config=config)
             bot_clients_started = True
         except Exception as e:
@@ -1400,6 +1420,45 @@ def main() -> int:
                 f"回测完成: processed={stats.get('processed')} saved={stats.get('saved')} "
                 f"completed={stats.get('completed')} insufficient={stats.get('insufficient')} errors={stats.get('errors')}"
             )
+            return 0
+
+        # 模式0: 盘中高频盯盘监控（前台手动运行，自动忽略交易时间限制以便于调试）
+        if getattr(args, 'monitor', False) or getattr(args, 'replay', False):
+            logger.info("模式: 盘中高频盯盘监控（前台手动运行）")
+            from src.monitor import RealtimeMonitor
+            # 允许手动运行时通过 --stocks 覆盖自选股池
+            if stock_codes:
+                config.stock_list = stock_codes
+            
+            monitor = RealtimeMonitor(config)
+            
+            # 判断是否运行回放模拟
+            # 如果指定了 --replay，或者当前不在交易时段内
+            run_simulation = getattr(args, 'replay', False)
+            if not run_simulation:
+                from src.monitor import is_within_trading_hours
+                # 检查第一个个股，如果不在交易时间段，自动启动回放模拟
+                sample_stock = monitor.stock_list[0] if monitor.stock_list else "600519"
+                if not is_within_trading_hours(sample_stock):
+                    run_simulation = True
+            
+            if run_simulation:
+                try:
+                    monitor.run_replay_simulation()
+                except Exception as e:
+                    logger.error(f"历史数据回放测试失败: {e}")
+                    logger.exception("错误明细:")
+                return 0
+            
+            # 正常实时轮询（交易时间段内）
+            import src.monitor as monitor_module
+            monitor_module.is_within_trading_hours = lambda code: True
+            
+            try:
+                logger.info(f"正在手动启动盯盘任务。股票池: {monitor.stock_list}")
+                monitor.start()
+            except KeyboardInterrupt:
+                logger.info("\n手动盯盘任务已由用户终止")
             return 0
 
         # 模式1: 仅大盘复盘
@@ -1474,6 +1533,14 @@ def main() -> int:
 
             background_tasks = []
             if getattr(config, 'agent_event_monitor_enabled', False):
+                # 启动新设计的盘中高频实时盯盘与 AI 诊断守护线程
+                try:
+                    logger.info("[盯盘监控] 启动盘中高频实时盯盘与异步 AI 诊断守护进程...")
+                    from src.monitor import start_monitor_thread
+                    start_monitor_thread(config)
+                except Exception as e:
+                    logger.error(f"[盯盘监控] 启动高频守护进程失败: {e}")
+
                 from src.services.alert_worker import AlertWorker
 
                 interval_minutes = max(1, getattr(config, 'agent_event_monitor_interval_minutes', 5))

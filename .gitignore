@@ -16,6 +16,7 @@
 /review.md
 /litellm_config.yaml
 /litellm_config.*.yaml
+/.codegraph
 
 # Python
 __pycache__/
