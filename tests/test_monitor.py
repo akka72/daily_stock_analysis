@@ -157,12 +157,13 @@ class TestMonitor(unittest.TestCase):
         self.assertEqual(len(monitor._replay_triggers), 1)
         self.assertIn("股价突破上限 26.0 元", monitor._replay_triggers[0])
 
-    def _make_default_rules_config(self, stock_list=None, rules_json="", defaults_enabled=True):
+    def _make_default_rules_config(self, stock_list=None, rules_json="", defaults_enabled=True, green_streak_mode="both"):
         """构建一个用于默认规则测试的 Mock Config。"""
         config = MagicMock()
         config.stock_list = stock_list if stock_list is not None else ["000725"]
         config.agent_event_alert_rules_json = rules_json
         config.agent_event_monitor_default_rules_enabled = defaults_enabled
+        config.agent_event_monitor_green_streak_mode = green_streak_mode
         config.agent_mode = False
         return config
 
@@ -256,6 +257,80 @@ class TestMonitor(unittest.TestCase):
         """关闭默认规则开关后，不注入任何默认规则。"""
         monitor = RealtimeMonitor(self._make_default_rules_config(defaults_enabled=False))
         self.assertEqual(monitor.rules, [])
+
+    def test_green_streak_sell_both_fires(self):
+        """连续2根价格绿柱+大单净流出且放量，应触发"连续绿柱卖出"(双重绿)。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        # 近几分钟成交量均值基线(股)，用于放量倍数判定
+        monitor.volume_history["000725"].extend([10000.0, 12000.0, 11000.0])
+        monitor.last_quotes["000725"] = self._q(price=10.0, volume=100000, large_net_inflow=0.0)
+        with patch("src.monitor.NotificationService"):
+            # 第1根绿:价格下跌+大单净流出+放量(连击=1,未达2根,不触发)
+            monitor.evaluate_quote(self._q(price=9.9, volume=200000, large_net_inflow=-100000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:00")
+            # 第2根绿:继续下跌+净流出+放量(连击=2,触发卖出信号)
+            monitor.evaluate_quote(self._q(price=9.8, volume=400000, large_net_inflow=-300000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:01")
+        self.assertTrue(
+            any("连续" in t and "卖出" in t for t in monitor._replay_triggers),
+            f"expected green-streak sell trigger, got {monitor._replay_triggers}",
+        )
+
+    def test_green_streak_sell_volume_gate_blocks(self):
+        """连续绿柱但成交量未放量，不应触发卖出信号。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        # 高基线均值，使后续小单无法达到 1.5 倍放量门槛
+        monitor.volume_history["000725"].extend([100000.0, 120000.0, 110000.0])
+        monitor.last_quotes["000725"] = self._q(price=10.0, volume=1000000, large_net_inflow=0.0)
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=9.9, volume=1010000, large_net_inflow=-50000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:00")
+            monitor.evaluate_quote(self._q(price=9.8, volume=1020000, large_net_inflow=-60000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:01")
+        self.assertFalse(
+            any("连续" in t and "卖出" in t for t in monitor._replay_triggers),
+            f"volume gate should block green-streak trigger, got {monitor._replay_triggers}",
+        )
+
+    def test_green_streak_sell_resets_on_red(self):
+        """绿→红→绿：红柱重置连击，单根绿不触发(需连续>=2根)。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        monitor.volume_history["000725"].extend([10000.0, 12000.0, 11000.0])
+        monitor.last_quotes["000725"] = self._q(price=10.0, volume=100000, large_net_inflow=0.0)
+        with patch("src.monitor.NotificationService"):
+            # 绿(连击1)
+            monitor.evaluate_quote(self._q(price=9.9, volume=200000, large_net_inflow=-100000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:00")
+            # 红柱:价格上涨+大单转流入，双重重置连击
+            monitor.evaluate_quote(self._q(price=10.0, volume=300000, large_net_inflow=50000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:01")
+            # 再绿(连击1,未达2根)
+            monitor.evaluate_quote(self._q(price=9.9, volume=500000, large_net_inflow=-100000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:02")
+        self.assertFalse(
+            any("连续" in t and "卖出" in t for t in monitor._replay_triggers),
+            f"red bar should reset streak, got {monitor._replay_triggers}",
+        )
+
+    def test_green_streak_sell_mode_price_only(self):
+        """mode=price 时只看价格连跌，大单方向不影响触发。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config(green_streak_mode="price"))
+        monitor._replay_triggers = []
+        monitor.volume_history["000725"].extend([10000.0, 12000.0, 11000.0])
+        monitor.last_quotes["000725"] = self._q(price=10.0, volume=100000, large_net_inflow=0.0)
+        with patch("src.monitor.NotificationService"):
+            # 价格连跌，但大单为净流入(红)——price 模式仍应触发
+            monitor.evaluate_quote(self._q(price=9.9, volume=200000, large_net_inflow=100000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:00")
+            monitor.evaluate_quote(self._q(price=9.8, volume=400000, large_net_inflow=200000.0),
+                                   is_replay=True, replay_time="2026-07-10 10:01")
+        self.assertTrue(
+            any("连续" in t and "价格绿柱" in t and "卖出" in t for t in monitor._replay_triggers),
+            f"price-mode should fire on price streak regardless of flow, got {monitor._replay_triggers}",
+        )
 
 
 if __name__ == "__main__":

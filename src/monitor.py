@@ -101,6 +101,9 @@ def parse_alert_rules(rules_json: str) -> List[dict]:
 
 # 默认盘中异动判定的放量倍数阈值（相对近2分钟均值），用于未显式配置规则的自选股
 DEFAULT_SURGE_RATIO = 3.0
+# 默认"连续绿柱卖出"判定：连续绿柱根数 / 放量倍数（相对近几分钟成交量均值）
+DEFAULT_GREEN_STREAK_BARS = 2
+DEFAULT_GREEN_STREAK_VOLUME_RATIO = 1.5
 
 
 class RealtimeMonitor:
@@ -155,6 +158,9 @@ class RealtimeMonitor:
         # 上一笔的方向/符号状态，用于红绿反转判定（红=涨/净流入，绿=跌/净流出）
         self.prev_price_direction: Dict[str, Optional[str]] = {}
         self.prev_large_sign: Dict[str, Optional[str]] = {}
+        # 连续绿柱（价格下跌 / 大单净流出）连击计数，用于"连续绿柱卖出"规则
+        self.consecutive_price_green: Dict[str, int] = {}
+        self.consecutive_flow_green: Dict[str, int] = {}
         
         # 预警冷却字典：避免短时间频繁发送报警，冷却时间默认 15 分钟
         self.cooldowns: Dict[tuple, float] = {}
@@ -170,6 +176,11 @@ class RealtimeMonitor:
         """是否启用内置默认盘中异动规则（默认开启）。"""
         return bool(getattr(self.config, "agent_event_monitor_default_rules_enabled", True))
 
+    def _green_streak_mode(self) -> str:
+        """连续绿柱卖出规则的判定维度：price(仅价格下跌)/flow(仅大单净流出)/both(双重绿，默认)。"""
+        mode = str(getattr(self.config, "agent_event_monitor_green_streak_mode", "both") or "both").strip().lower()
+        return mode if mode in ("price", "flow", "both") else "both"
+
     def _inject_default_rules(self, explicit_rules: List[dict]) -> List[dict]:
         """
         为自选池中"未配置任何显式规则"的股票自动补充默认盘中异动规则：
@@ -177,6 +188,7 @@ class RealtimeMonitor:
           - large_flow_surge   : 大单净额突然变大/变小（标注红/绿）
           - price_reversal     : 价格方向反转（红转绿/绿转红）
           - flow_reversal      : 大单净额反转（红转绿/绿转红）
+          - green_streak_sell  : 连续绿柱卖出（连续放量下跌/大单净流出，维度可配 price/flow/both）
         已显式配置规则的股票保持完全由用户规则控制。
         """
         if not self._default_rules_enabled():
@@ -195,6 +207,14 @@ class RealtimeMonitor:
             enriched.append({"stock_code": code, "type": "large_flow_surge", "threshold": surge_ratio, "_default": True})
             enriched.append({"stock_code": code, "type": "price_reversal", "threshold": None, "_default": True})
             enriched.append({"stock_code": code, "type": "flow_reversal", "threshold": None, "_default": True})
+            enriched.append({
+                "stock_code": code,
+                "type": "green_streak_sell",
+                "threshold": DEFAULT_GREEN_STREAK_BARS,
+                "mode": self._green_streak_mode(),
+                "volume_ratio": DEFAULT_GREEN_STREAK_VOLUME_RATIO,
+                "_default": True,
+            })
         return enriched
 
     @staticmethod
@@ -289,6 +309,16 @@ class RealtimeMonitor:
                 self.flow_history[code].append(abs(delta_f))
             if delta_large != 0:
                 self.large_flow_history[code].append(abs(delta_large))
+
+            # 连续绿柱连击计数（价格下跌 / 大单净流出 各计一路），供"连续绿柱卖出"规则判定
+            if self._price_direction(quote.price, last_quote.price) == "绿":
+                self.consecutive_price_green[code] = self.consecutive_price_green.get(code, 0) + 1
+            else:
+                self.consecutive_price_green[code] = 0
+            if self._large_net_sign(quote.large_net_inflow) == "绿":
+                self.consecutive_flow_green[code] = self.consecutive_flow_green.get(code, 0) + 1
+            else:
+                self.consecutive_flow_green[code] = 0
 
             # 2. 评估针对该股票的所有预警规则
             for rule in self.rules:
@@ -392,6 +422,32 @@ class RealtimeMonitor:
                         _flip = "红转绿" if prev_sign == "红" else "绿转红"
                         rule_desc = f"大单净额反转 {_flip}（上笔{prev_sign} → 本笔{cur_sign}）"
 
+                # G. 连续绿柱卖出（连续放量下跌 / 大单净流出；维度 mode=price/flow/both）
+                elif r_type == "green_streak_sell":
+                    _bars = int(threshold) if threshold else DEFAULT_GREEN_STREAK_BARS
+                    _mode = str(rule.get("mode") or "both").strip().lower()
+                    if _mode not in ("price", "flow", "both"):
+                        _mode = "both"
+                    _vol_ratio = float(rule.get("volume_ratio") or DEFAULT_GREEN_STREAK_VOLUME_RATIO)
+                    _p_streak = self.consecutive_price_green.get(code, 0)
+                    _f_streak = self.consecutive_flow_green.get(code, 0)
+                    _hist_len = len(self.volume_history[code])
+                    _avg_v = sum(self.volume_history[code]) / _hist_len if _hist_len >= 2 else 0.0
+                    _volume_ok = _avg_v > 0 and delta_v >= _vol_ratio * _avg_v
+                    _hit, _detail = False, ""
+                    if _mode == "price" and _p_streak >= _bars:
+                        _hit, _detail = True, f"连续 {_p_streak} 根价格绿柱(每分钟下跌)"
+                    elif _mode == "flow" and _f_streak >= _bars:
+                        _hit, _detail = True, f"连续 {_f_streak} 根大单净流出(主力出货)"
+                    elif _mode == "both" and _p_streak >= _bars and _f_streak >= _bars:
+                        _hit, _detail = True, f"连续 {_p_streak} 根价格绿柱 + {_f_streak} 根大单净流出(双重绿)"
+                    if _hit and _volume_ok:
+                        triggered = True
+                        rule_desc = (
+                            f"{_detail} 且放量(区间成交 {delta_v / 100:.0f} 手，为近均值的 "
+                            f"{delta_v / _avg_v:.1f} 倍) → ⚠️ 注意卖出止盈/止损"
+                        )
+
                 # 3. 触发预警逻辑
                 if triggered:
                     self.cooldowns[cooldown_key] = current_time_val + self._cooldown_seconds(r_type)
@@ -493,6 +549,8 @@ class RealtimeMonitor:
                     logger.info(f"[东财资金流向接口返回] 状态码: {r.status_code}, 键值: {list(json_data.keys())}")
                     klines = json_data.get("data", {}).get("klines", []) if json_data.get("data") else []
                     logger.info(f"[东财资金流向数据样例] 样本长度: {len(klines)}, 前3条数据: {klines[:3]}")
+                    if getattr(self.config, "agent_event_monitor_replay_debug", False):
+                        logger.info(f"[回放-原始] 资金流向 klines 全量({len(klines)}条): {klines}")
                     for kline in klines:
                         parts = kline.split(",")
                         if len(parts) >= 6:
@@ -522,6 +580,8 @@ class RealtimeMonitor:
                     logger.info(f"[东财分时趋势接口返回] 状态码: {r.status_code}, 键值: {list(json_data.keys())}")
                     trends_list = json_data.get("data", {}).get("trends", []) if json_data.get("data") else []
                     logger.info(f"[东财分时趋势数据样例] 样本长度: {len(trends_list)}, 前3条数据: {trends_list[:3]}")
+                    if getattr(self.config, "agent_event_monitor_replay_debug", False):
+                        logger.info(f"[回放-原始] 分时 trends 全量({len(trends_list)}条): {trends_list}")
             except Exception as e:
                 logger.error(f"[回放] 拉取 {code} 分时趋势失败: {e}")
                 logger.error("[提示] 访问东财接口被拒。若开启了 VPN 或代理软件（如 Clash 开启系统代理/TUN模式），请尝试切换为“直连 (Direct)”模式或关闭代理后再试。")
@@ -568,6 +628,14 @@ class RealtimeMonitor:
 
             logger.info(f"[回放] {name}({code}) 数据匹配完成，匹配到 {len(matched_quotes)} 条分钟级行情。开始回放比对...")
 
+            if getattr(self.config, "agent_event_monitor_replay_debug", False):
+                logger.info(f"[回放-原始] flow_map({len(flow_map)}条): {flow_map}")
+                for _q in matched_quotes:
+                    logger.info(
+                        f"[回放-明细] {_q['time']} 价={_q['price']} 累计量={_q['volume'] / 100:.0f}手 "
+                        f"主力净额={_q['main_net_inflow'] / 10000.0:.2f}万 大单净额={_q['large_net_inflow'] / 10000.0:.2f}万"
+                    )
+
             # E. 初始化该股票的回放队列环境，清除缓存
             self.volume_history[code].clear()
             self.flow_history[code].clear()
@@ -575,6 +643,8 @@ class RealtimeMonitor:
             self.last_quotes.pop(code, None)
             self.prev_price_direction.pop(code, None)
             self.prev_large_sign.pop(code, None)
+            self.consecutive_price_green.pop(code, None)
+            self.consecutive_flow_green.pop(code, None)
 
             # F. 开始回放计算
             stock_triggers = 0
@@ -607,6 +677,8 @@ class RealtimeMonitor:
             self.last_quotes.pop(code, None)
             self.prev_price_direction.pop(code, None)
             self.prev_large_sign.pop(code, None)
+            self.consecutive_price_green.pop(code, None)
+            self.consecutive_flow_green.pop(code, None)
 
             logger.info(f"[回放] {name}({code}) 回放测试完成！触发预警次数: {stock_triggers}")
 
