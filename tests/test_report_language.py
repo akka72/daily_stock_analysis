@@ -64,6 +64,20 @@ class ReportLanguageTestCase(unittest.TestCase):
             ("Strong Buy", "💚", "strong_buy"),
         )
 
+    def test_get_signal_level_preserves_strong_sell_text_below_upgrade_threshold(self) -> None:
+        self.assertEqual(
+            get_signal_level("强烈卖出", 72, "zh"),
+            ("强烈卖出", "🔴", "strong_sell"),
+        )
+        self.assertEqual(
+            get_signal_level("Strong Sell", 72, "en"),
+            ("Strong Sell", "🔴", "strong_sell"),
+        )
+        self.assertEqual(
+            get_signal_level("적극 매도", 72, "ko"),
+            ("적극 매도", "🔴", "strong_sell"),
+        )
+
     def test_get_signal_level_preserves_add_action_for_high_score(self) -> None:
         for advice, language, expected in (
             ("加仓", "zh", "加仓"),

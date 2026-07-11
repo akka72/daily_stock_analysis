@@ -722,6 +722,35 @@ def test_display_action_fields_preserves_strong_buy_label_for_explicit_advice() 
     }
 
 
+def test_display_action_fields_preserves_strong_sell_label_for_explicit_advice() -> None:
+    assert display_action_fields(
+        operation_advice="强烈卖出",
+        sentiment_score=72,
+        report_language="zh",
+    ) == {
+        "action": "sell",
+        "action_label": "强烈卖出",
+    }
+
+    assert display_action_fields(
+        operation_advice="strong sell",
+        sentiment_score=72,
+        report_language="en",
+    ) == {
+        "action": "sell",
+        "action_label": "Strong Sell",
+    }
+
+    assert display_action_fields(
+        operation_advice="적극 매도",
+        sentiment_score=72,
+        report_language="ko",
+    ) == {
+        "action": "sell",
+        "action_label": "적극 매도",
+    }
+
+
 def test_display_action_fields_prefers_strong_buy_action_label_when_explicit_label_supplied() -> None:
     assert display_action_fields(
         operation_advice="持有",
@@ -740,6 +769,19 @@ def test_display_action_fields_prefers_strong_buy_action_label_when_explicit_lab
     ) == {
         "action": "buy",
         "action_label": "적극 매수",
+    }
+
+
+def test_display_action_fields_prefers_strong_sell_action_label_when_explicit_action_is_set() -> None:
+    assert display_action_fields(
+        operation_advice="持有",
+        explicit_action="sell",
+        action_label="强烈卖出",
+        sentiment_score=72,
+        report_language="zh",
+    ) == {
+        "action": "sell",
+        "action_label": "强烈卖出",
     }
 
 

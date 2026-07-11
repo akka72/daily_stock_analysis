@@ -41,6 +41,7 @@ _ACTION_LABELS: Dict[str, Dict[str, str]] = {
 }
 
 _STRONG_BUY_LABELS = {"zh": "强烈买入", "en": "Strong Buy", "ko": "적극 매수"}
+_STRONG_SELL_LABELS = {"zh": "强烈卖出", "en": "Strong Sell", "ko": "적극 매도"}
 
 _LOCALIZED_EXPLICIT_ALIASES: Dict[str, DecisionAction] = {
     label: action
@@ -52,6 +53,8 @@ _EXPLICIT_ALIASES: Dict[str, DecisionAction] = {
     **_LOCALIZED_EXPLICIT_ALIASES,
     "strong buy": "buy",
     "적극 매수": "buy",
+    "적극 매도": "sell",
+    "강력 매도": "sell",
     "accumulate": "add",
     "trim": "reduce",
     "strong sell": "sell",
@@ -112,6 +115,8 @@ _ACTION_PHRASES: Dict[DecisionAction, tuple[str, ...]] = {
         "强烈卖出",
         "strong_sell",
         "strong sell",
+        "적극 매도",
+        "강력 매도",
         "卖出",
         "清仓",
         "sell",
@@ -270,6 +275,15 @@ _STRONG_BUY_TEXT_MARKERS = frozenset(
         "적극 매수",
     }
 )
+_STRONG_SELL_TEXT_MARKERS = frozenset(
+    {
+        "强烈卖出",
+        "strong_sell",
+        "strong sell",
+        "적극 매도",
+        "강력 매도",
+    }
+)
 
 
 def _normalize_key(value: Any) -> str:
@@ -377,6 +391,13 @@ def _has_strong_buy_marker(value: Any) -> bool:
     if not normalized:
         return False
     return any(marker in normalized for marker in _STRONG_BUY_TEXT_MARKERS)
+
+
+def _has_strong_sell_marker(value: Any) -> bool:
+    normalized = _normalize_key(value)
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _STRONG_SELL_TEXT_MARKERS)
 
 
 def _is_negated_hold_advice(value: Any) -> bool:
@@ -611,6 +632,12 @@ def display_action_fields(
         or _has_strong_buy_marker(action_label)
     ):
         fields["action_label"] = _STRONG_BUY_LABELS[normalize_report_language(report_language)]
+    if fields["action"] == "sell" and (
+        _has_strong_sell_marker(action_source)
+        or _has_strong_sell_marker(operation_advice)
+        or _has_strong_sell_marker(action_label)
+    ):
+        fields["action_label"] = _STRONG_SELL_LABELS[normalize_report_language(report_language)]
     return fields
 
 

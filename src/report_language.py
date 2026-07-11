@@ -1023,6 +1023,8 @@ def get_signal_level(advice: Any, score: Any, language: Optional[str]) -> tuple[
 
     if canonical == "strong_buy":
         return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")
+    if canonical == "strong_sell":
+        return (_OPERATION_ADVICE_TRANSLATIONS["strong_sell"][normalized_language], "🔴", "strong_sell")
     if canonical == "buy":
         if score_signal == "strong_buy":
             return (_OPERATION_ADVICE_TRANSLATIONS["strong_buy"][normalized_language], "💚", "strong_buy")

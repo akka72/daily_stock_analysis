@@ -60,6 +60,25 @@ def test_record_to_signal_prefers_legacy_decision_type_over_score_for_persisted_
     assert signal["action_label"] == "卖出"
 
 
+def test_record_to_signal_preserves_strong_sell_label_from_legacy_advice() -> None:
+    signal = _record_to_signal(
+        _history_record(
+            raw_result={
+                "action": "unknown",
+                "operation_advice": "强烈卖出",
+                "report_language": "zh",
+                "guardrail_reason": None,
+            },
+            report_language="zh",
+            sentiment_score=72,
+        )
+    )
+
+    assert signal is not None
+    assert signal["action"] == "sell"
+    assert signal["action_label"] == "强烈卖出"
+
+
 def test_record_to_signal_prefers_action_label_when_action_invalid() -> None:
     signal = _record_to_signal(
         _history_record(
