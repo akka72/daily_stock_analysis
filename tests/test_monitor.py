@@ -4,6 +4,7 @@
 """
 
 import sys
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -331,6 +332,53 @@ class TestMonitor(unittest.TestCase):
             any("连续" in t and "价格绿柱" in t and "卖出" in t for t in monitor._replay_triggers),
             f"price-mode should fire on price streak regardless of flow, got {monitor._replay_triggers}",
         )
+
+    def test_monitor_registry_start_stop(self):
+        """start_monitor_thread 注册实例后 status.running=True；stop 经 Event 立即唤醒并清理注册表。"""
+        import src.monitor as monitor_module
+        monitor_module.stop_monitor_thread()  # 清理可能残留的实例
+
+        config = MagicMock()
+        config.stock_list = []  # 空池 -> run_check_cycle 为空操作，不触网
+        config.agent_event_alert_rules_json = ""
+        config.agent_event_monitor_default_rules_enabled = False
+        config.agent_event_monitor_interval_minutes = 0.1  # -> max(6, 5) = 6s，靠 Event 唤醒而非等满
+        config.agent_mode = False
+
+        # 初始无活跃实例
+        self.assertFalse(monitor_module.get_monitor_status()["running"])
+
+        thread = monitor_module.start_monitor_thread(config)
+        self.assertIsNotNone(thread)
+        try:
+            # 等待线程进入 start() 并置 _running=True
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not monitor_module.get_monitor_status()["running"]:
+                time.sleep(0.02)
+            status = monitor_module.get_monitor_status()
+            self.assertTrue(status["running"])
+            self.assertTrue(status["thread_alive"])
+            self.assertEqual(status["interval_seconds"], 6)
+
+            # stop() 通过 _stop_event.set() 立即唤醒，不应等满 6s
+            self.assertTrue(monitor_module.stop_monitor_thread())
+            thread.join(timeout=3.0)
+            self.assertFalse(thread.is_alive())
+
+            after = monitor_module.get_monitor_status()
+            self.assertFalse(after["running"])
+            self.assertEqual(after["stock_list"], [])
+        finally:
+            monitor_module.stop_monitor_thread()
+
+    def test_stop_monitor_when_idle_returns_false(self):
+        """无活跃实例时 stop_monitor_thread 应返回 False（幂等、无副作用）。"""
+        import src.monitor as monitor_module
+        monitor_module.stop_monitor_thread()  # 确保空闲
+        self.assertFalse(monitor_module.stop_monitor_thread())
+        status = monitor_module.get_monitor_status()
+        self.assertFalse(status["running"])
+        self.assertEqual(status["stock_list"], [])
 
 
 if __name__ == "__main__":

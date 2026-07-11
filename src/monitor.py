@@ -165,6 +165,8 @@ class RealtimeMonitor:
         # 预警冷却字典：避免短时间频繁发送报警，冷却时间默认 15 分钟
         self.cooldowns: Dict[tuple, float] = {}
         self._running = False
+        # 停止信号：让 start() 的等待可被立即唤醒，实现响应式停止（替代阻塞式 time.sleep）
+        self._stop_event = threading.Event()
         
         default_rule_count = len(self.rules) - explicit_rule_count
         logger.info(
@@ -739,32 +741,97 @@ class RealtimeMonitor:
     def start(self):
         """启动监控守护循环"""
         self._running = True
+        self._stop_event.clear()
         # 默认 5 分钟，如果用户配置为小数（如 0.16 则是 10 秒），读取并转换
         interval_min = getattr(self.config, "agent_event_monitor_interval_minutes", 5.0) or 5.0
         interval_seconds = max(int(interval_min * 60), 5) # 最小间隔 5 秒以防过载东财接口
-        
+
         logger.info(f"[盯盘监控] 后台盯盘守护进程已启动，轮询间隔: {interval_seconds} 秒")
-        
+
         while self._running:
             self.run_check_cycle()
-            time.sleep(interval_seconds)
+            # 用 Event.wait 替代 time.sleep：stop() 触发 set() 后立即唤醒退出，无需等到下个轮询
+            if self._stop_event.wait(timeout=interval_seconds):
+                break
+        logger.info("[盯盘监控] 后台盯盘守护循环已退出。")
 
     def stop(self):
         """关闭盯盘服务"""
         self._running = False
+        self._stop_event.set()  # 立即唤醒可能在 wait 的 start() 循环
         logger.info("[盯盘监控] 盯盘守护服务已请求停止。")
+
+
+# ── 进程内盯盘实例注册表 ──────────────────────────────────────────────
+# 用于 WebUI/API 运行时启停：保存当前后台盯盘的 monitor 实例与线程句柄。
+# main.py 的自动启动与 stop_monitor_thread()/get_monitor_status() 共享同一份注册表，
+# 确保全局只有一个活跃盯盘实例。
+_monitor_state: Dict[str, object] = {"monitor": None, "thread": None}
+_monitor_state_lock = threading.Lock()
 
 
 def start_monitor_thread(config) -> Optional[threading.Thread]:
     """
-    外部启动入口：拉起后台监控守护线程
+    外部启动入口：拉起后台监控守护线程。
+    若已有运行中的盯盘实例，先停止旧的再用最新 config 重建，保证全局唯一活跃实例。
     """
+    stop_monitor_thread()  # 先停旧的，避免重复实例
     try:
         monitor = RealtimeMonitor(config)
         t = threading.Thread(target=monitor.start, name="RealtimeMonitorThread", daemon=True)
+        with _monitor_state_lock:
+            _monitor_state["monitor"] = monitor
+            _monitor_state["thread"] = t
         t.start()
+        logger.info("[盯盘监控] 已通过注册表拉起后台盯盘线程。")
         return t
     except Exception as e:
         logger.error(f"[盯盘监控] 启动盘中监控守护线程失败: {e}")
         logger.exception("监控启动错误明细:")
         return None
+
+
+def stop_monitor_thread() -> bool:
+    """
+    停止当前后台盯盘实例（若存在）。返回是否曾存在并请求了停止。
+    不阻塞等待线程退出：守护线程会在当前轮询结束或被 Event 唤醒后自行退出。
+    """
+    with _monitor_state_lock:
+        monitor = _monitor_state.get("monitor")
+    if monitor is None:
+        return False
+    try:
+        monitor.stop()
+    except Exception as e:
+        logger.error(f"[盯盘监控] 停止盯盘实例出错: {e}")
+    with _monitor_state_lock:
+        # 仅当注册表仍指向同一实例时才清空，避免清掉刚刚启动的新实例
+        if _monitor_state.get("monitor") is monitor:
+            _monitor_state["monitor"] = None
+            _monitor_state["thread"] = None
+    logger.info("[盯盘监控] 已请求停止后台盯盘线程并清理注册表。")
+    return True
+
+
+def get_monitor_status() -> dict:
+    """返回当前后台盯盘实例的运行状态，供 WebUI/API 展示。"""
+    with _monitor_state_lock:
+        monitor = _monitor_state.get("monitor")
+        thread = _monitor_state.get("thread")
+    if monitor is None:
+        return {
+            "running": False,
+            "thread_alive": False,
+            "stock_list": [],
+            "interval_seconds": 0,
+            "rules_count": 0,
+        }
+    interval_min = getattr(monitor.config, "agent_event_monitor_interval_minutes", 5.0) or 5.0
+    interval_seconds = max(int(interval_min * 60), 5)
+    return {
+        "running": bool(getattr(monitor, "_running", False)),
+        "thread_alive": bool(thread is not None and thread.is_alive()),
+        "stock_list": list(getattr(monitor, "stock_list", []) or []),
+        "interval_seconds": interval_seconds,
+        "rules_count": len(getattr(monitor, "rules", []) or []),
+    }

@@ -22,6 +22,7 @@ from api.v1.endpoints import (
     health,
     history,
     intelligence,
+    monitor,
     portfolio,
     stocks,
     system_config,
@@ -72,6 +73,12 @@ router.include_router(
     system_config.router,
     prefix="/system",
     tags=["SystemConfig"]
+)
+
+router.include_router(
+    monitor.router,
+    prefix="/monitor",
+    tags=["Monitor"]
 )
 
 router.include_router(
