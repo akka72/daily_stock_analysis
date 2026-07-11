@@ -1190,4 +1190,98 @@ describe('stockPoolStore', () => {
       forceRefresh: true,
     }));
   });
+
+  it('keeps stock-bar failure state when a stale older request succeeds after a newer failure', async () => {
+    const staleStockBarRequest = createDeferred<{
+      total: number;
+      page: number;
+      limit: number;
+      items: typeof historyItem[];
+    }>();
+    const latestStockBarRequest = createDeferred<{
+      total: number;
+      page: number;
+      limit: number;
+      items: typeof historyItem[];
+    }>();
+
+    vi.mocked(historyApi.getStockBarList)
+      .mockReturnValueOnce(staleStockBarRequest.promise)
+      .mockReturnValueOnce(latestStockBarRequest.promise);
+
+    const stalePromise = useStockPoolStore.getState().refreshStockBar();
+    const latestPromise = useStockPoolStore.getState().refreshStockBar();
+
+    latestStockBarRequest.reject(new Error('latest failed'));
+    staleStockBarRequest.resolve({
+      total: 1,
+      page: 1,
+      limit: 20,
+      items: [historyItem],
+    });
+
+    await Promise.all([stalePromise, latestPromise]);
+
+    const stateAfterLatest = useStockPoolStore.getState();
+    expect(stateAfterLatest.stockBarRefreshFailed).toBe(true);
+
+    expect(stateAfterLatest.stockBarItems).toEqual([]);
+  });
+
+  it('keeps newer stock-bar results when a stale earlier request fails after newer success', async () => {
+    const staleStockBarRequest = createDeferred<{
+      total: number;
+      page: number;
+      limit: number;
+      items: typeof historyItem[];
+    }>();
+    const latestStockBarRequest = createDeferred<{
+      total: number;
+      page: number;
+      limit: number;
+      items: typeof historyItem[];
+    }>();
+
+    const latestItems = [
+      {
+        ...historyItem,
+        id: 8,
+        queryId: 'q-latest',
+      },
+    ];
+    const staleItems = [
+      {
+        ...historyItem,
+        id: 9,
+        queryId: 'q-stale',
+      },
+    ];
+
+    vi.mocked(historyApi.getStockBarList)
+      .mockReturnValueOnce(staleStockBarRequest.promise)
+      .mockReturnValueOnce(latestStockBarRequest.promise);
+
+    const stalePromise = useStockPoolStore.getState().refreshStockBar();
+    const latestPromise = useStockPoolStore.getState().refreshStockBar();
+
+    latestStockBarRequest.resolve({
+      total: latestItems.length,
+      page: 1,
+      limit: 20,
+      items: latestItems,
+    });
+    await latestPromise;
+
+    staleStockBarRequest.resolve({
+      total: staleItems.length,
+      page: 1,
+      limit: 20,
+      items: staleItems,
+    });
+    await stalePromise;
+
+    const finalState = useStockPoolStore.getState();
+    expect(finalState.stockBarItems).toEqual(latestItems);
+    expect(finalState.stockBarRefreshFailed).toBe(false);
+  });
 });
