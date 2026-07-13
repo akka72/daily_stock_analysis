@@ -440,6 +440,75 @@ class TestMonitor(unittest.TestCase):
         self.assertFalse(monitor.open_surge_fired["000725"])
         self.assertEqual(len(monitor.price_history["000725"]), 1)
 
+    def test_open_surge_revert_fires_once(self):
+        """开盘冲高(+2%≥1.5%)后回落(自高点跌0.98%≥0.5%)→触发一次，标记高点价 10.20。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 09:30")
+            monitor.evaluate_quote(self._q(price=10.20, volume=120000), is_replay=True, replay_time="2026-07-13 09:35")
+            monitor.evaluate_quote(self._q(price=10.10, volume=130000), is_replay=True, replay_time="2026-07-13 09:40")
+        hits = [t for t in monitor._replay_triggers if "开盘冲高" in t]
+        self.assertEqual(len(hits), 1, f"expected one open-surge-revert, got {monitor._replay_triggers}")
+        self.assertIn("10.20", hits[0])
+        self.assertTrue(monitor.open_surge_fired["000725"])
+
+    def test_open_surge_revert_no_spike_no_fire(self):
+        """开盘即跌(无冲高)→不触发(交给 sharp_drop)。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 09:30")
+            monitor.evaluate_quote(self._q(price=9.95, volume=110000), is_replay=True, replay_time="2026-07-13 09:35")
+            monitor.evaluate_quote(self._q(price=9.90, volume=120000), is_replay=True, replay_time="2026-07-13 09:40")
+        self.assertFalse(any("开盘冲高" in t for t in monitor._replay_triggers), monitor._replay_triggers)
+
+    def test_open_surge_revert_no_revert_no_fire(self):
+        """冲高后继续上行(无回落)→不触发。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 09:30")
+            monitor.evaluate_quote(self._q(price=10.20, volume=120000), is_replay=True, replay_time="2026-07-13 09:35")
+            monitor.evaluate_quote(self._q(price=10.30, volume=130000), is_replay=True, replay_time="2026-07-13 09:40")
+        self.assertFalse(any("开盘冲高" in t for t in monitor._replay_triggers), monitor._replay_triggers)
+
+    def test_open_surge_revert_one_shot(self):
+        """冲高回落触发后，再冲高回落→仅触发 1 次(fired 标志)。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 09:30")
+            monitor.evaluate_quote(self._q(price=10.20, volume=120000), is_replay=True, replay_time="2026-07-13 09:35")
+            monitor.evaluate_quote(self._q(price=10.10, volume=130000), is_replay=True, replay_time="2026-07-13 09:40")
+            monitor.evaluate_quote(self._q(price=10.25, volume=140000), is_replay=True, replay_time="2026-07-13 09:42")
+            monitor.evaluate_quote(self._q(price=10.10, volume=150000), is_replay=True, replay_time="2026-07-13 09:44")
+        self.assertEqual(len([t for t in monitor._replay_triggers if "开盘冲高" in t]), 1)
+
+    def test_open_surge_revert_resets_next_day(self):
+        """跨日 open_day 变更→fired 复位，可再次触发。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 09:30")
+            monitor.evaluate_quote(self._q(price=10.20, volume=120000), is_replay=True, replay_time="2026-07-13 09:35")
+            monitor.evaluate_quote(self._q(price=10.10, volume=130000), is_replay=True, replay_time="2026-07-13 09:40")
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-14 09:30")
+            monitor.evaluate_quote(self._q(price=10.20, volume=120000), is_replay=True, replay_time="2026-07-14 09:35")
+            monitor.evaluate_quote(self._q(price=10.10, volume=130000), is_replay=True, replay_time="2026-07-14 09:40")
+        self.assertEqual(len([t for t in monitor._replay_triggers if "开盘冲高" in t]), 2)
+
+    def test_open_surge_revert_out_of_window_no_high_update(self):
+        """10:00(窗口外)不更新 open_high，open_high 停在首笔 10.00，无 spike 不触发。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 10:00")
+            monitor.evaluate_quote(self._q(price=10.20, volume=120000), is_replay=True, replay_time="2026-07-13 10:05")
+            monitor.evaluate_quote(self._q(price=10.10, volume=130000), is_replay=True, replay_time="2026-07-13 10:10")
+        self.assertFalse(any("开盘冲高" in t for t in monitor._replay_triggers), monitor._replay_triggers)
+        self.assertAlmostEqual(monitor.open_high["000725"], 10.00)
+
 
 class TestMonitorDetectorConfig(unittest.TestCase):
     """开盘冲高回落 + 急跌幅度 检测器的 config 字段解析。"""

@@ -230,6 +230,15 @@ class RealtimeMonitor:
                 "volume_ratio": DEFAULT_GREEN_STREAK_VOLUME_RATIO,
                 "_default": True,
             })
+            if self._open_surge_revert_enabled():
+                enriched.append({
+                    "stock_code": code,
+                    "type": "open_surge_revert",
+                    "surge_pct": self._open_surge_pct(),
+                    "revert_pct": self._open_revert_pct(),
+                    "window": self._open_surge_window_minutes(),
+                    "_default": True,
+                })
         return enriched
 
     @staticmethod
@@ -544,6 +553,26 @@ class RealtimeMonitor:
                             f"{_detail} 且放量(区间成交 {delta_v / 100:.0f} 手，为近均值的 "
                             f"{delta_v / _avg_v:.1f} 倍) → ⚠️ 注意卖出止盈/止损"
                         )
+
+                # H. 开盘冲高回落：开盘窗口内冲高创局部高点后回落 → 一次性提示高点价位 + 下杀起点
+                elif r_type == "open_surge_revert":
+                    _raw_sp = rule.get("surge_pct")
+                    _surge_pct = float(_raw_sp) if _raw_sp is not None else self._open_surge_pct()
+                    _raw_rp = rule.get("revert_pct")
+                    _revert_pct = float(_raw_rp) if _raw_rp is not None else self._open_revert_pct()
+                    _o_high = self.open_high.get(code)
+                    _o_price = self.open_price.get(code)
+                    if (_o_high is not None and _o_price is not None and _o_price > 0
+                            and not self.open_surge_fired.get(code, False) and quote.price is not None):
+                        _spike = _o_high >= _o_price * (1.0 + _surge_pct / 100.0)
+                        _revert = _o_high > 0 and (_o_high - quote.price) / _o_high * 100.0 >= _revert_pct
+                        if _spike and _revert:
+                            self.open_surge_fired[code] = True
+                            triggered = True
+                            rule_desc = (
+                                f"开盘冲高至 {_o_high:.2f} 元后回落"
+                                f"（跌幅 {(_o_high - quote.price) / _o_high * 100.0:.2f}%），⚠️ 注意下杀风险"
+                            )
 
                 # 3. 触发预警逻辑
                 if triggered:
