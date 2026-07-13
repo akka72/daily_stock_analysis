@@ -118,6 +118,9 @@ const HomePage: React.FC = () => {
     refreshMarketReviewHistory,
     selectHistoryItem,
     submitAnalysis,
+    submitBatchAnalysis,
+    isAnalyzingBatch,
+    batchSummary,
     notify,
     setNotify,
     syncTaskCreated,
@@ -671,6 +674,9 @@ const HomePage: React.FC = () => {
           onItemClick={handleHistoryItemClick}
           onDeleteStock={handleDeleteStock}
           isDeleting={isDeletingStock}
+          onAnalyzeSelected={submitBatchAnalysis}
+          isAnalyzingBatch={isAnalyzingBatch}
+          batchSummary={batchSummary}
           className="flex-1 overflow-hidden"
         />
       </div>
@@ -682,6 +688,9 @@ const HomePage: React.FC = () => {
       handleHistoryItemClick,
       handleDeleteStock,
       isDeletingStock,
+      submitBatchAnalysis,
+      isAnalyzingBatch,
+      batchSummary,
       openTaskRunFlow,
       selectedReport?.meta.stockCode,
       selectedReport?.meta.id,
