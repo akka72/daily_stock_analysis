@@ -47,6 +47,10 @@ let activeTaskRequestSeq = 0;
 let activeTaskLocalRevision = 0;
 let manualSelectionRequestSeq = 0;
 let manualSelectionRequestId = 0;
+/** 批量分析请求序号，防止旧请求的回包覆盖新请求的状态。 */
+let batchRequestSeq = 0;
+/** batchSummary 自动清空定时器句柄。 */
+let batchSummaryTimerId: ReturnType<typeof setTimeout> | null = null;
 const dismissedTaskIds = new Set<string>();
 const pendingCompletedTaskSelectionKeys = new Map<string, CompletedTaskSelectionIntent>();
 
@@ -58,6 +62,10 @@ export interface StockPoolState {
   duplicateError: string | null;
   error: ParsedApiError | null;
   isAnalyzing: boolean;
+  /** 批量分析进行中。 */
+  isAnalyzingBatch: boolean;
+  /** 最近一次批量分析的中文摘要（5s 后自动清空）。 */
+  batchSummary: string | null;
   historyItems: HistoryItem[];
   selectedHistoryIds: number[];
   isDeletingHistory: boolean;
@@ -111,6 +119,8 @@ export interface StockPoolState {
   toggleSelectAllVisibleMarketReviewHistory: () => void;
   deleteSelectedMarketReviewHistory: () => Promise<void>;
   submitAnalysis: (options?: SubmitAnalysisOptions) => Promise<void>;
+  /** 把选中的股票代码批量加入待分析队列。 */
+  submitBatchAnalysis: (stockCodes: string[]) => Promise<void>;
   setNotify: (notify: boolean) => void;
   syncTaskCreated: (task: TaskInfo) => void;
   syncTaskUpdated: (task: TaskInfo) => void;
@@ -130,6 +140,8 @@ const initialState = {
   duplicateError: null,
   error: null,
   isAnalyzing: false,
+  isAnalyzingBatch: false,
+  batchSummary: null,
   historyItems: [] as HistoryItem[],
   selectedHistoryIds: [] as number[],
   isDeletingHistory: false,
@@ -944,6 +956,71 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     }
   },
 
+  submitBatchAnalysis: async (stockCodes: string[]) => {
+    // 防御性过滤：去空白、去重、排除 'MARKET'（大盘复盘伪项，非个股）。
+    const codes = Array.from(
+      new Set(
+        (stockCodes ?? [])
+          .map((c) => (typeof c === 'string' ? c.trim() : ''))
+          .filter((c) => c && c !== 'MARKET'),
+      ),
+    );
+    if (codes.length === 0) {
+      set({ inputError: '请选择有效的股票（不含大盘复盘）' });
+      return;
+    }
+    const MAX_BATCH = 50;
+    if (codes.length > MAX_BATCH) {
+      set({ error: `一次最多批量分析 ${MAX_BATCH} 只，当前选中 ${codes.length} 只` });
+      return;
+    }
+    const seq = ++batchRequestSeq;
+    if (batchSummaryTimerId !== null) {
+      clearTimeout(batchSummaryTimerId);
+      batchSummaryTimerId = null;
+    }
+    set({
+      isAnalyzingBatch: true,
+      error: null,
+      inputError: undefined,
+      duplicateError: null,
+      batchSummary: null,
+    });
+    try {
+      const { notify } = get();
+      const result = await analysisApi.analyzeBatch(codes, { notify });
+      // 旧请求的回包：不覆盖新请求的状态。
+      if (seq !== batchRequestSeq) return;
+      const acceptedCount = result.accepted.length;
+      const dupCount = result.duplicates.length;
+      let summary: string;
+      if (acceptedCount === 0 && dupCount > 0) {
+        summary = `选中的 ${dupCount} 只均在分析中，已全部跳过`;
+      } else if (dupCount > 0) {
+        summary = `已加入 ${acceptedCount} 只，${dupCount} 只正在分析中已跳过`;
+      } else {
+        summary = `已加入 ${acceptedCount} 只到分析队列`;
+      }
+      set({ batchSummary: summary });
+      batchSummaryTimerId = setTimeout(() => {
+        batchSummaryTimerId = null;
+        // 仅当仍是同一序号时清空，避免清掉更新的摘要。
+        if (seq === batchRequestSeq) set({ batchSummary: null });
+      }, 5000);
+    } catch (error) {
+      // 旧请求的错误：不覆盖新请求的状态。
+      if (seq !== batchRequestSeq) return;
+      if (error instanceof DuplicateTaskError) {
+        set({ duplicateError: `股票 ${error.stockCode} 正在分析中，请等待完成` });
+      } else {
+        set({ error: getParsedApiError(error) });
+      }
+    } finally {
+      // 当前序号的请求结束时，务必释放进行中标志（仿 submitAnalysis 的 finally）。
+      if (seq === batchRequestSeq) set({ isAnalyzingBatch: false });
+    }
+  },
+
   syncTaskCreated: (task) => {
     if (dismissedTaskIds.has(task.taskId)) {
       return;
@@ -1036,6 +1113,11 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     stockHistoryRequestSeq += 1;
     reportRequestSeq = 0;
     analyzeRequestSeq = 0;
+    batchRequestSeq = 0;
+    if (batchSummaryTimerId !== null) {
+      clearTimeout(batchSummaryTimerId);
+      batchSummaryTimerId = null;
+    }
     manualSelectionRequestSeq = 0;
     manualSelectionRequestId = 0;
     activeTaskRequestSeq += 1;
