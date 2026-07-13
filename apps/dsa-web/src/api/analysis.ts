@@ -6,8 +6,10 @@ import type {
   AnalyzeResponse,
   AnalyzeAsyncResponse,
   AnalysisReport,
+  BatchTaskAcceptedResponse,
   MarketReviewAccepted,
   MarketReviewRequest,
+  TaskAccepted,
   TaskStatus,
   TaskListResponse,
 } from '../types/analysis';
@@ -94,6 +96,54 @@ export const analysisApi = {
     }
 
     return toCamelCase<AnalyzeAsyncResponse>(response.data);
+  },
+
+  /**
+   * 批量异步分析。多只 → 202 BatchTaskAcceptedResponse（后端自动去重，返回 duplicates）；
+   * 单只且正在分析 → 409 → 抛 DuplicateTaskError；
+   * 单只成功（后端返回 flat TaskAccepted）归一化为 1 元素 accepted 数组，便于上层统一处理。
+   * @param stockCodes 股票代码数组（调用方需先过滤 'MARKET' 等伪项）
+   * @param options notify / reportLanguage / skills，复用 AnalysisRequest 字段
+   */
+  analyzeBatch: async (
+    stockCodes: string[],
+    options?: Pick<AnalysisRequest, 'notify' | 'reportLanguage' | 'skills'>,
+  ): Promise<BatchTaskAcceptedResponse> => {
+    const requestData = {
+      stock_codes: stockCodes,
+      report_type: 'detailed',
+      async_mode: true,
+      analysis_phase: 'auto',
+      selection_source: 'manual',
+      report_language: options?.reportLanguage,
+      skills: options?.skills,
+      ...(options?.notify !== undefined && { notify: options.notify }),
+    };
+
+    const response = await apiClient.post<Record<string, unknown>>(
+      '/api/v1/analysis/analyze',
+      requestData,
+      { validateStatus: (status) => status === 200 || status === 202 || status === 409 },
+    );
+
+    if (response.status === 409) {
+      const errorData = toCamelCase<{ stockCode: string; existingTaskId: string; message: string }>(
+        response.data,
+      );
+      throw new DuplicateTaskError(errorData.stockCode, errorData.existingTaskId, errorData.message);
+    }
+
+    const data = toCamelCase<TaskAccepted | BatchTaskAcceptedResponse>(response.data);
+    // 单只成功 → 后端返回 flat TaskAccepted（不含 stock_code）；回填输入代码以满足 BatchTaskAcceptedItem 契约。
+    if ('taskId' in data && !('accepted' in data)) {
+      const single = data as TaskAccepted;
+      return {
+        accepted: [{ ...single, stockCode: stockCodes[0] ?? '' }],
+        duplicates: [],
+        message: single.message ?? '',
+      };
+    }
+    return data as BatchTaskAcceptedResponse;
   },
 
   /**
