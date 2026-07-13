@@ -409,6 +409,37 @@ class TestMonitor(unittest.TestCase):
         self.assertFalse(status["running"])
         self.assertEqual(status["stock_list"], [])
 
+    def test_open_surge_and_sharp_drop_helpers_read_config(self):
+        """7 个阈值 helper 应从 config 读出真实值（非 MagicMock 的 0.0/0）。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        self.assertTrue(monitor._open_surge_revert_enabled())
+        self.assertEqual(monitor._open_surge_window_minutes(), 15)
+        self.assertAlmostEqual(monitor._open_surge_pct(), 1.5)
+        self.assertAlmostEqual(monitor._open_revert_pct(), 0.5)
+        self.assertTrue(monitor._sharp_drop_enabled())
+        self.assertEqual(monitor._sharp_drop_bars(), 5)
+        self.assertAlmostEqual(monitor._sharp_drop_pct(), 1.5)
+
+    def test_in_open_window_boundary(self):
+        """开盘窗口 [09:30, 09:45) 左闭右开；09:45 与 10:00 不在窗口内。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        self.assertTrue(monitor._in_open_window(datetime.datetime(2026, 7, 13, 9, 30).timestamp()))
+        self.assertTrue(monitor._in_open_window(datetime.datetime(2026, 7, 13, 9, 44, 59).timestamp()))
+        self.assertFalse(monitor._in_open_window(datetime.datetime(2026, 7, 13, 9, 45).timestamp()))
+        self.assertFalse(monitor._in_open_window(datetime.datetime(2026, 7, 13, 10, 0).timestamp()))
+
+    def test_price_history_and_open_state_seeded_on_first_bar(self):
+        """首笔行情（无 last_quote）应种子 open_price/open_high/open_day 并追加 price_history。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.0, volume=100000), is_replay=True, replay_time="2026-07-13 09:30")
+        self.assertAlmostEqual(monitor.open_price["000725"], 10.0)
+        self.assertAlmostEqual(monitor.open_high["000725"], 10.0)
+        self.assertEqual(monitor.open_day["000725"], "2026-07-13")
+        self.assertFalse(monitor.open_surge_fired["000725"])
+        self.assertEqual(len(monitor.price_history["000725"]), 1)
+
 
 class TestMonitorDetectorConfig(unittest.TestCase):
     """开盘冲高回落 + 急跌幅度 检测器的 config 字段解析。"""

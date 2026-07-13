@@ -17,7 +17,7 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, time as datetime_time
+from datetime import datetime, time as datetime_time, timedelta
 from typing import Dict, List, Optional
 
 import requests
@@ -167,7 +167,14 @@ class RealtimeMonitor:
         # 红绿反转降噪：截至上一笔的"连续同向"计数（价格方向 / 大单符号），过滤单笔抖动
         self.price_dir_run: Dict[str, int] = {}
         self.flow_sign_run: Dict[str, int] = {}
-        
+        # 急跌幅度检测：近期价格序列（固定上限窗口，按 bars 回看，含首笔）
+        self.price_history = collections.defaultdict(lambda: collections.deque(maxlen=60))
+        # 开盘冲高回落：日内开盘价 / 开盘窗口运行最高价 / 当日已触发标志 / 状态所属日期
+        self.open_price: Dict[str, float] = {}
+        self.open_high: Dict[str, float] = {}
+        self.open_surge_fired: Dict[str, bool] = {}
+        self.open_day: Dict[str, str] = {}
+
         # 预警冷却字典：避免短时间频繁发送报警，冷却时间默认 15 分钟
         self.cooldowns: Dict[tuple, float] = {}
         self._running = False
@@ -260,6 +267,61 @@ class RealtimeMonitor:
             val = DEFAULT_REVERSAL_BARS
         return val if val >= 1 else DEFAULT_REVERSAL_BARS
 
+    def _open_surge_revert_enabled(self) -> bool:
+        """是否注入开盘冲高回落规则（受总闸门 + 独立开关双重控制）。"""
+        return bool(getattr(self.config, "agent_event_monitor_open_surge_revert_enabled", True))
+
+    def _open_surge_window_minutes(self) -> int:
+        """开盘冲高窗口长度（分钟，自 09:30 起），最低 1。"""
+        try:
+            val = int(getattr(self.config, "agent_event_monitor_open_surge_window_minutes", 15) or 15)
+        except (TypeError, ValueError):
+            val = 15
+        return val if val >= 1 else 15
+
+    def _open_surge_pct(self) -> float:
+        """冲高判定：相对开盘价涨幅 %。"""
+        try:
+            return float(getattr(self.config, "agent_event_monitor_open_surge_pct", 1.5) or 1.5)
+        except (TypeError, ValueError):
+            return 1.5
+
+    def _open_revert_pct(self) -> float:
+        """回落判定：自开盘高点跌幅 %。"""
+        try:
+            return float(getattr(self.config, "agent_event_monitor_open_revert_pct", 0.5) or 0.5)
+        except (TypeError, ValueError):
+            return 0.5
+
+    def _sharp_drop_enabled(self) -> bool:
+        """是否注入急跌幅度规则（受总闸门 + 独立开关双重控制）。"""
+        return bool(getattr(self.config, "agent_event_monitor_sharp_drop_enabled", True))
+
+    def _sharp_drop_bars(self) -> int:
+        """急跌回看笔数，最低 1。"""
+        try:
+            val = int(getattr(self.config, "agent_event_monitor_sharp_drop_bars", 5) or 5)
+        except (TypeError, ValueError):
+            val = 5
+        return val if val >= 1 else 5
+
+    def _sharp_drop_pct(self) -> float:
+        """急跌判定：窗口跌幅 %。"""
+        try:
+            return float(getattr(self.config, "agent_event_monitor_sharp_drop_pct", 1.5) or 1.5)
+        except (TypeError, ValueError):
+            return 1.5
+
+    def _in_open_window(self, ts: float) -> bool:
+        """当前时间戳是否落在开盘冲高窗口 [09:30, 09:30+window) 内（A 股，本地时区）。"""
+        try:
+            dt = datetime.fromtimestamp(ts)
+        except Exception:
+            return False
+        start = dt.replace(hour=9, minute=30, second=0, microsecond=0)
+        end = start + timedelta(minutes=self._open_surge_window_minutes())
+        return start <= dt < end
+
     def run_check_cycle(self):
         """执行单次轮询检测周期"""
         for code in self.stock_list:
@@ -291,12 +353,31 @@ class RealtimeMonitor:
         # 确定时间基准
         if is_replay and replay_time:
             try:
-                dt = datetime.datetime.strptime(replay_time, "%Y-%m-%d %H:%M")
+                dt = datetime.strptime(replay_time, "%Y-%m-%d %H:%M")
                 current_time_val = dt.timestamp()
             except Exception:
                 current_time_val = time.time()
         else:
             current_time_val = time.time()
+
+        # 开盘冲高回落 / 急跌幅度 状态捕获（须在 last_quote 判定之前，确保首笔种子 open_price）
+        if self._sharp_drop_enabled() and quote.price is not None:
+            self.price_history[code].append(quote.price)
+        if self._open_surge_revert_enabled() and quote.price is not None:
+            try:
+                _now_dt = datetime.fromtimestamp(current_time_val)
+            except Exception:
+                _now_dt = None
+            if _now_dt is not None:
+                _today = _now_dt.strftime("%Y-%m-%d")
+                if self.open_day.get(code) != _today:
+                    self.open_price[code] = quote.price
+                    self.open_high[code] = quote.price
+                    self.open_surge_fired[code] = False
+                    self.open_day[code] = _today
+                if self._in_open_window(current_time_val):
+                    if quote.price > self.open_high.get(code, quote.price):
+                        self.open_high[code] = quote.price
 
         last_quote = self.last_quotes.get(code)
         if last_quote:
