@@ -971,7 +971,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     }
     const MAX_BATCH = 50;
     if (codes.length > MAX_BATCH) {
-      set({ error: `一次最多批量分析 ${MAX_BATCH} 只，当前选中 ${codes.length} 只` });
+      set({ inputError: `一次最多批量分析 ${MAX_BATCH} 只，当前选中 ${codes.length} 只` });
       return;
     }
     const seq = ++batchRequestSeq;

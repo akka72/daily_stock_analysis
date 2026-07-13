@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analysisApi, DuplicateTaskError } from '../../api/analysis';
 import { historyApi } from '../../api/history';
-import type { AnalysisReport, HistoryListResponse, TaskInfo, TaskListResponse } from '../../types/analysis';
+import type {
+  AnalysisReport,
+  BatchTaskAcceptedResponse,
+  HistoryListResponse,
+  TaskInfo,
+  TaskListResponse,
+} from '../../types/analysis';
 import { getRecentStartDate, getTodayInShanghai } from '../../utils/format';
 import { useStockPoolStore } from '../stockPoolStore';
 
@@ -1203,7 +1209,10 @@ describe('submitBatchAnalysis', () => {
 
   it('过滤 MARKET/空串后只提交有效股并拼成功摘要', async () => {
     analyzeBatchSpy.mockResolvedValueOnce({
-      accepted: [{ taskId: 't1' }, { taskId: 't2' }],
+      accepted: [
+        { taskId: 't1', stockCode: '600519', status: 'pending' },
+        { taskId: 't2', stockCode: '000001', status: 'pending' },
+      ],
       duplicates: [],
       message: '',
     });
@@ -1220,17 +1229,17 @@ describe('submitBatchAnalysis', () => {
     expect(useStockPoolStore.getState().inputError).toBeTruthy();
   });
 
-  it('有效股超过 50 → 置 error 且不调用 analyzeBatch', async () => {
+  it('有效股超过 50 → 置 inputError 且不调用 analyzeBatch', async () => {
     const codes = Array.from({ length: 51 }, (_, i) => String(600000 + i));
     await useStockPoolStore.getState().submitBatchAnalysis(codes);
     expect(analyzeBatchSpy).not.toHaveBeenCalled();
-    expect(useStockPoolStore.getState().error).toContain('50');
+    expect(useStockPoolStore.getState().inputError).toContain('50');
   });
 
   it('部分重复 → 摘要含跳过数', async () => {
     analyzeBatchSpy.mockResolvedValueOnce({
-      accepted: [{ taskId: 't1' }],
-      duplicates: [{ stockCode: '000001' }],
+      accepted: [{ taskId: 't1', stockCode: '600519', status: 'pending' }],
+      duplicates: [{ stockCode: '000001', existingTaskId: 'e1', message: 'dup' }],
       message: '',
     });
     await useStockPoolStore.getState().submitBatchAnalysis(['600519', '000001']);
@@ -1240,7 +1249,10 @@ describe('submitBatchAnalysis', () => {
   it('全部重复 → 全部跳过文案', async () => {
     analyzeBatchSpy.mockResolvedValueOnce({
       accepted: [],
-      duplicates: [{ stockCode: '600519' }, { stockCode: '000001' }],
+      duplicates: [
+        { stockCode: '600519', existingTaskId: 'e1', message: 'dup' },
+        { stockCode: '000001', existingTaskId: 'e2', message: 'dup' },
+      ],
       message: '',
     });
     await useStockPoolStore.getState().submitBatchAnalysis(['600519', '000001']);
@@ -1263,17 +1275,21 @@ describe('submitBatchAnalysis', () => {
   });
 
   it('提交期间 isAnalyzingBatch 为 true，完成后复位', async () => {
-    let resolve!: (v: unknown) => void;
-    analyzeBatchSpy.mockReturnValueOnce(new Promise((r) => { resolve = r; }));
+    let resolve!: (v: BatchTaskAcceptedResponse) => void;
+    analyzeBatchSpy.mockReturnValueOnce(new Promise<BatchTaskAcceptedResponse>((r) => { resolve = r; }));
     const p = useStockPoolStore.getState().submitBatchAnalysis(['600519']);
     expect(useStockPoolStore.getState().isAnalyzingBatch).toBe(true);
-    resolve({ accepted: [{ taskId: 't1' }], duplicates: [], message: '' });
+    resolve({ accepted: [{ taskId: 't1', stockCode: '600519', status: 'pending' }], duplicates: [], message: '' });
     await p;
     expect(useStockPoolStore.getState().isAnalyzingBatch).toBe(false);
   });
 
   it('resetDashboardState 清空批量分析状态', async () => {
-    analyzeBatchSpy.mockResolvedValueOnce({ accepted: [{ taskId: 't1' }], duplicates: [], message: '' });
+    analyzeBatchSpy.mockResolvedValueOnce({
+      accepted: [{ taskId: 't1', stockCode: '600519', status: 'pending' }],
+      duplicates: [],
+      message: '',
+    });
     await useStockPoolStore.getState().submitBatchAnalysis(['600519']);
     useStockPoolStore.getState().resetDashboardState();
     const s = useStockPoolStore.getState();
@@ -1282,18 +1298,25 @@ describe('submitBatchAnalysis', () => {
   });
 
   it('并发提交：旧请求的回包不覆盖新请求的摘要', async () => {
-    let resolveA!: (v: unknown) => void;
-    let resolveB!: (v: unknown) => void;
-    analyzeBatchSpy.mockReturnValueOnce(new Promise((r) => { resolveA = r; }));
-    analyzeBatchSpy.mockReturnValueOnce(new Promise((r) => { resolveB = r; }));
+    let resolveA!: (v: BatchTaskAcceptedResponse) => void;
+    let resolveB!: (v: BatchTaskAcceptedResponse) => void;
+    analyzeBatchSpy.mockReturnValueOnce(new Promise<BatchTaskAcceptedResponse>((r) => { resolveA = r; }));
+    analyzeBatchSpy.mockReturnValueOnce(new Promise<BatchTaskAcceptedResponse>((r) => { resolveB = r; }));
     const pA = useStockPoolStore.getState().submitBatchAnalysis(['600519']);
     const pB = useStockPoolStore.getState().submitBatchAnalysis(['000001']);
     // B（当前序号）先返回 → 摘要为 B 的「已加入 1 只」
-    resolveB({ accepted: [{ taskId: 'tB' }], duplicates: [], message: '' });
+    resolveB({ accepted: [{ taskId: 'tB', stockCode: '000001', status: 'pending' }], duplicates: [], message: '' });
     await pB;
     expect(useStockPoolStore.getState().batchSummary).toBe('已加入 1 只到分析队列');
     // A（过期序号）后返回，其「已加入 2 只」不得覆盖
-    resolveA({ accepted: [{ taskId: 'tA' }, { taskId: 'tA2' }], duplicates: [], message: '' });
+    resolveA({
+      accepted: [
+        { taskId: 'tA', stockCode: '600519', status: 'pending' },
+        { taskId: 'tA2', stockCode: '000002', status: 'pending' },
+      ],
+      duplicates: [],
+      message: '',
+    });
     await pA;
     expect(useStockPoolStore.getState().batchSummary).toBe('已加入 1 只到分析队列');
     expect(useStockPoolStore.getState().isAnalyzingBatch).toBe(false);
@@ -1302,7 +1325,11 @@ describe('submitBatchAnalysis', () => {
   it('5s 后 batchSummary 自动清空', async () => {
     vi.useFakeTimers();
     try {
-      analyzeBatchSpy.mockResolvedValueOnce({ accepted: [{ taskId: 't1' }], duplicates: [], message: '' });
+      analyzeBatchSpy.mockResolvedValueOnce({
+        accepted: [{ taskId: 't1', stockCode: '600519', status: 'pending' }],
+        duplicates: [],
+        message: '',
+      });
       await useStockPoolStore.getState().submitBatchAnalysis(['600519']);
       expect(useStockPoolStore.getState().batchSummary).toBeTruthy();
       vi.advanceTimersByTime(5000);
