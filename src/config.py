@@ -871,6 +871,15 @@ class Config:
     agent_event_monitor_replay_debug: bool = False  # 回放时打印东财原始数据(分时/资金流向/逐笔明细)用于排查
     agent_event_monitor_green_streak_mode: str = "both"  # 连续绿柱卖出判定维度: price(仅价格下跌)/flow(仅大单净流出)/both(双重绿)
     agent_event_monitor_reversal_bars: int = 3  # 红绿反转降噪: 前序须连续 N 根同向(红或绿)才视为有效反转，过滤单笔抖动(最低1)
+    # 开盘冲高回落检测器（受 default_rules_enabled 总闸门 + 独立开关控制）
+    agent_event_monitor_open_surge_revert_enabled: bool = True
+    agent_event_monitor_open_surge_window_minutes: int = 15
+    agent_event_monitor_open_surge_pct: float = 1.5
+    agent_event_monitor_open_revert_pct: float = 0.5
+    # 急跌幅度检测器
+    agent_event_monitor_sharp_drop_enabled: bool = True
+    agent_event_monitor_sharp_drop_bars: int = 5
+    agent_event_monitor_sharp_drop_pct: float = 1.5
     # --- 东财个股资金流加固(盘中盯盘) ---
     eastmoney_flow_min_interval_seconds: float = 1.0  # 两次资金流请求最小间隔(+jitter)，避免触发东财 IP 软封禁
     eastmoney_flow_retry_count: int = 2  # 资金流拉取瞬时失败的指数退避重试次数
@@ -1840,6 +1849,25 @@ class Config:
                 field_name='AGENT_EVENT_MONITOR_REVERSAL_BARS',
                 minimum=1,
             ),
+            agent_event_monitor_open_surge_revert_enabled=parse_env_bool(
+                os.getenv('AGENT_EVENT_MONITOR_OPEN_SURGE_REVERT_ENABLED'), True),
+            agent_event_monitor_open_surge_window_minutes=parse_env_int(
+                os.getenv('AGENT_EVENT_MONITOR_OPEN_SURGE_WINDOW_MINUTES'), 15,
+                field_name='AGENT_EVENT_MONITOR_OPEN_SURGE_WINDOW_MINUTES', minimum=1),
+            agent_event_monitor_open_surge_pct=parse_env_float(
+                os.getenv('AGENT_EVENT_MONITOR_OPEN_SURGE_PCT'), 1.5,
+                field_name='AGENT_EVENT_MONITOR_OPEN_SURGE_PCT', minimum=0.0),
+            agent_event_monitor_open_revert_pct=parse_env_float(
+                os.getenv('AGENT_EVENT_MONITOR_OPEN_REVERT_PCT'), 0.5,
+                field_name='AGENT_EVENT_MONITOR_OPEN_REVERT_PCT', minimum=0.0),
+            agent_event_monitor_sharp_drop_enabled=parse_env_bool(
+                os.getenv('AGENT_EVENT_MONITOR_SHARP_DROP_ENABLED'), True),
+            agent_event_monitor_sharp_drop_bars=parse_env_int(
+                os.getenv('AGENT_EVENT_MONITOR_SHARP_DROP_BARS'), 5,
+                field_name='AGENT_EVENT_MONITOR_SHARP_DROP_BARS', minimum=1),
+            agent_event_monitor_sharp_drop_pct=parse_env_float(
+                os.getenv('AGENT_EVENT_MONITOR_SHARP_DROP_PCT'), 1.5,
+                field_name='AGENT_EVENT_MONITOR_SHARP_DROP_PCT', minimum=0.0),
             eastmoney_flow_min_interval_seconds=parse_env_float(
                 os.getenv('EASTMONEY_FLOW_MIN_INTERVAL_SECONDS'),
                 1.0,

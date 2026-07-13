@@ -3,6 +3,8 @@
 单元测试：实时监控与预警规则评估
 """
 
+import datetime
+import os
 import sys
 import time
 import unittest
@@ -158,6 +160,14 @@ class TestMonitor(unittest.TestCase):
         config.agent_event_monitor_default_rules_enabled = defaults_enabled
         config.agent_event_monitor_green_streak_mode = green_streak_mode
         config.agent_event_monitor_reversal_bars = 3
+        # 开盘冲高回落 + 急跌幅度 检测器配置（显式设值，避免 MagicMock float()/int() 静默返回 0.0/0）
+        config.agent_event_monitor_open_surge_revert_enabled = True
+        config.agent_event_monitor_open_surge_window_minutes = 15
+        config.agent_event_monitor_open_surge_pct = 1.5
+        config.agent_event_monitor_open_revert_pct = 0.5
+        config.agent_event_monitor_sharp_drop_enabled = True
+        config.agent_event_monitor_sharp_drop_bars = 5
+        config.agent_event_monitor_sharp_drop_pct = 1.5
         config.agent_mode = False
         return config
 
@@ -398,6 +408,59 @@ class TestMonitor(unittest.TestCase):
         status = monitor_module.get_monitor_status()
         self.assertFalse(status["running"])
         self.assertEqual(status["stock_list"], [])
+
+
+class TestMonitorDetectorConfig(unittest.TestCase):
+    """开盘冲高回落 + 急跌幅度 检测器的 config 字段解析。"""
+
+    def test_config_loads_detector_fields_from_env(self):
+        """config 应解析 7 个新盘中检测器字段（含 env 覆盖）。"""
+        from src.config import Config
+        env = {
+            "AGENT_EVENT_MONITOR_OPEN_SURGE_REVERT_ENABLED": "false",
+            "AGENT_EVENT_MONITOR_OPEN_SURGE_WINDOW_MINUTES": "20",
+            "AGENT_EVENT_MONITOR_OPEN_SURGE_PCT": "2.5",
+            "AGENT_EVENT_MONITOR_OPEN_REVERT_PCT": "0.8",
+            "AGENT_EVENT_MONITOR_SHARP_DROP_ENABLED": "false",
+            "AGENT_EVENT_MONITOR_SHARP_DROP_BARS": "8",
+            "AGENT_EVENT_MONITOR_SHARP_DROP_PCT": "2.0",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = Config._load_from_env()
+        self.assertFalse(cfg.agent_event_monitor_open_surge_revert_enabled)
+        self.assertEqual(cfg.agent_event_monitor_open_surge_window_minutes, 20)
+        self.assertAlmostEqual(cfg.agent_event_monitor_open_surge_pct, 2.5)
+        self.assertAlmostEqual(cfg.agent_event_monitor_open_revert_pct, 0.8)
+        self.assertFalse(cfg.agent_event_monitor_sharp_drop_enabled)
+        self.assertEqual(cfg.agent_event_monitor_sharp_drop_bars, 8)
+        self.assertAlmostEqual(cfg.agent_event_monitor_sharp_drop_pct, 2.0)
+
+    def test_config_detector_fields_defaults(self):
+        """无 env 时 7 字段取默认值（save/restore，避免污染本进程 env）。"""
+        from src.config import Config
+        env_keys = [
+            "AGENT_EVENT_MONITOR_OPEN_SURGE_REVERT_ENABLED",
+            "AGENT_EVENT_MONITOR_OPEN_SURGE_WINDOW_MINUTES",
+            "AGENT_EVENT_MONITOR_OPEN_SURGE_PCT",
+            "AGENT_EVENT_MONITOR_OPEN_REVERT_PCT",
+            "AGENT_EVENT_MONITOR_SHARP_DROP_ENABLED",
+            "AGENT_EVENT_MONITOR_SHARP_DROP_BARS",
+            "AGENT_EVENT_MONITOR_SHARP_DROP_PCT",
+        ]
+        saved = {k: os.environ.pop(k, None) for k in env_keys}
+        try:
+            cfg = Config._load_from_env()
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+        self.assertTrue(cfg.agent_event_monitor_open_surge_revert_enabled)
+        self.assertEqual(cfg.agent_event_monitor_open_surge_window_minutes, 15)
+        self.assertAlmostEqual(cfg.agent_event_monitor_open_surge_pct, 1.5)
+        self.assertAlmostEqual(cfg.agent_event_monitor_open_revert_pct, 0.5)
+        self.assertTrue(cfg.agent_event_monitor_sharp_drop_enabled)
+        self.assertEqual(cfg.agent_event_monitor_sharp_drop_bars, 5)
+        self.assertAlmostEqual(cfg.agent_event_monitor_sharp_drop_pct, 1.5)
 
 
 if __name__ == "__main__":
