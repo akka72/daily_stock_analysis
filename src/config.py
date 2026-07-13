@@ -871,6 +871,12 @@ class Config:
     agent_event_monitor_replay_debug: bool = False  # 回放时打印东财原始数据(分时/资金流向/逐笔明细)用于排查
     agent_event_monitor_green_streak_mode: str = "both"  # 连续绿柱卖出判定维度: price(仅价格下跌)/flow(仅大单净流出)/both(双重绿)
     agent_event_monitor_reversal_bars: int = 3  # 红绿反转降噪: 前序须连续 N 根同向(红或绿)才视为有效反转，过滤单笔抖动(最低1)
+    # --- 东财个股资金流加固(盘中盯盘) ---
+    eastmoney_flow_min_interval_seconds: float = 1.0  # 两次资金流请求最小间隔(+jitter)，避免触发东财 IP 软封禁
+    eastmoney_flow_retry_count: int = 2  # 资金流拉取瞬时失败的指数退避重试次数
+    eastmoney_flow_failure_threshold: int = 3  # 连续失败几次后熔断东财资金流
+    eastmoney_flow_circuit_cooldown_seconds: int = 300  # 熔断冷却(秒):期间跳过资金流、纯价格盯盘，让 IP 自然解封
+    fundamental_tushare_moneyflow_enabled: bool = False  # akshare 日线资金流失败时回落 Tushare moneyflow(需 TUSHARE_TOKEN + moneyflow 权限，默认关省积分)
 
     # === 通知配置（可同时配置多个，全部推送）===
     
@@ -1834,6 +1840,31 @@ class Config:
                 field_name='AGENT_EVENT_MONITOR_REVERSAL_BARS',
                 minimum=1,
             ),
+            eastmoney_flow_min_interval_seconds=parse_env_float(
+                os.getenv('EASTMONEY_FLOW_MIN_INTERVAL_SECONDS'),
+                1.0,
+                field_name='EASTMONEY_FLOW_MIN_INTERVAL_SECONDS',
+                minimum=0.0,
+            ),
+            eastmoney_flow_retry_count=parse_env_int(
+                os.getenv('EASTMONEY_FLOW_RETRY_COUNT'),
+                2,
+                field_name='EASTMONEY_FLOW_RETRY_COUNT',
+                minimum=1,
+            ),
+            eastmoney_flow_failure_threshold=parse_env_int(
+                os.getenv('EASTMONEY_FLOW_FAILURE_THRESHOLD'),
+                3,
+                field_name='EASTMONEY_FLOW_FAILURE_THRESHOLD',
+                minimum=1,
+            ),
+            eastmoney_flow_circuit_cooldown_seconds=parse_env_int(
+                os.getenv('EASTMONEY_FLOW_CIRCUIT_COOLDOWN_SECONDS'),
+                300,
+                field_name='EASTMONEY_FLOW_CIRCUIT_COOLDOWN_SECONDS',
+                minimum=0,
+            ),
+            fundamental_tushare_moneyflow_enabled=os.getenv('FUNDAMENTAL_TUSHARE_MONEYFLOW_ENABLED', 'false').lower() == 'true',
             wechat_webhook_url=os.getenv('WECHAT_WEBHOOK_URL'),
             feishu_webhook_url=os.getenv('FEISHU_WEBHOOK_URL'),
             feishu_webhook_secret=os.getenv('FEISHU_WEBHOOK_SECRET'),

@@ -24,6 +24,7 @@ import requests
 
 from data_provider import DataFetcherManager
 from data_provider.realtime_types import UnifiedRealtimeQuote, safe_float
+from data_provider.eastmoney_flow import fetch_fflow_klines
 from src.config import get_config
 from src.core.trading_calendar import get_market_for_stock, is_market_open
 from src.notification import NotificationService
@@ -556,37 +557,23 @@ class RealtimeMonitor:
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
 
-            # B. 拉取资金流向分钟数据 (使用 http 协议绕过代理)
+            # B. 拉取资金流向分钟数据（http 绕过代理；节流/退避/熔断集中在 eastmoney_flow）
             flow_map = {}
-            try:
-                flow_url = "http://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
-                flow_params = {
-                    "lmt": "0",
-                    "klt": "1",
-                    "secid": secid,
-                    "fields1": "f1,f2,f3,f7",
-                    "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63",
-                    "ut": "b2884a393a59ad64002292a3e90d46a5"
-                }
-                r = requests.get(flow_url, params=flow_params, headers=headers, proxies={"http": None, "https": None}, timeout=10)
-                if r.status_code == 200:
-                    json_data = r.json()
-                    logger.info(f"[东财资金流向接口返回] 状态码: {r.status_code}, 键值: {list(json_data.keys())}")
-                    klines = json_data.get("data", {}).get("klines", []) if json_data.get("data") else []
-                    logger.info(f"[东财资金流向数据样例] 样本长度: {len(klines)}, 前3条数据: {klines[:3]}")
-                    if getattr(self.config, "agent_event_monitor_replay_debug", False):
-                        logger.info(f"[回放-原始] 资金流向 klines 全量({len(klines)}条): {klines}")
-                    for kline in klines:
-                        parts = kline.split(",")
-                        if len(parts) >= 6:
-                            flow_map[parts[0]] = {
-                                "main_net_inflow": float(parts[1]),
-                                "large_net_inflow": float(parts[4]),
-                                "super_large_net_inflow": float(parts[5]),
-                            }
-            except Exception as e:
-                logger.error(f"[回放] 拉取 {code} 资金流向失败: {e}")
-                logger.error("[提示] 访问东财接口被拒。若开启了 VPN 或代理软件（如 Clash 开启系统代理/TUN模式），请尝试切换为“直连 (Direct)”模式或关闭代理后再试。")
+            raw_klines = fetch_fflow_klines(secid, timeout=10.0)
+            if raw_klines:
+                logger.info(f"[东财资金流向数据样例] 样本长度: {len(raw_klines)}, 前3条: {[','.join(p) for p in raw_klines[:3]]}")
+                if getattr(self.config, "agent_event_monitor_replay_debug", False):
+                    logger.info(f"[回放-原始] 资金流向 klines 全量({len(raw_klines)}条): {[','.join(p) for p in raw_klines]}")
+                for parts in raw_klines:
+                    if len(parts) >= 6:
+                        flow_map[parts[0]] = {
+                            "main_net_inflow": float(parts[1]),
+                            "large_net_inflow": float(parts[4]),
+                            "super_large_net_inflow": float(parts[5]),
+                        }
+            else:
+                logger.error(f"[回放] 拉取 {code} 资金流向失败（东财拒绝或熔断）")
+                logger.error("[提示] 访问东财接口被拒。若开启了 VPN 或代理软件（如 Clash 开启系统代理/TUN模式），请尝试切换为\"直连 (Direct)\"模式或关闭代理后再试。")
                 continue
 
             # C. 拉取分时趋势分钟数据 (使用 http 协议绕过代理)

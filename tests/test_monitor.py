@@ -97,8 +97,7 @@ class TestMonitor(unittest.TestCase):
             # 验证至少触发了通知发送
             self.assertTrue(mock_send.called)
 
-    @patch('src.monitor.requests.get')
-    def test_run_replay_simulation(self, mock_get):
+    def test_run_replay_simulation(self):
         # 1. 模拟行情
         config = MagicMock()
         config.stock_list = ["600118"]
@@ -120,21 +119,15 @@ class TestMonitor(unittest.TestCase):
         )
         monitor.fetcher_mgr.get_realtime_quote = MagicMock(return_value=latest_quote)
 
-        # 3. 模拟 requests.get 响应
-        # 第一个请求：资金流向 klines
-        mock_flow_response = MagicMock()
-        mock_flow_response.status_code = 200
-        mock_flow_response.json.return_value = {
-            "data": {
-                "klines": [
-                    "2026-07-10 09:31,100000.0,0.0,0.0,50000.0,50000.0",
-                    "2026-07-10 09:32,200000.0,0.0,0.0,100000.0,100000.0",
-                    "2026-07-10 09:33,300000.0,0.0,0.0,150000.0,150000.0"
-                ]
-            }
-        }
-        
-        # 第二个请求：分时趋势 trends
+        # 3. 模拟资金流向(经 eastmoney_flow 加固路径返回已 split 的列表) + 分时趋势
+        flow_klines = [
+            "2026-07-10 09:31,100000.0,0.0,0.0,50000.0,50000.0",
+            "2026-07-10 09:32,200000.0,0.0,0.0,100000.0,100000.0",
+            "2026-07-10 09:33,300000.0,0.0,0.0,150000.0,150000.0",
+        ]
+        parsed_flow = [s.split(",") for s in flow_klines]
+
+        # 分时趋势 trends（回放路径仍用 requests.get）
         mock_trend_response = MagicMock()
         mock_trend_response.status_code = 200
         mock_trend_response.json.return_value = {
@@ -147,11 +140,10 @@ class TestMonitor(unittest.TestCase):
             }
         }
 
-        # 设置 side_effect 让 mock_get 依次返回 flow 和 trend 响应
-        mock_get.side_effect = [mock_flow_response, mock_trend_response]
-
-        # 运行回放模拟
-        monitor.run_replay_simulation()
+        # 运行回放模拟：资金流走 fetch_fflow_klines，分时走 requests.get
+        with patch("src.monitor.fetch_fflow_klines", return_value=parsed_flow), \
+             patch("src.monitor.requests.get", return_value=mock_trend_response):
+            monitor.run_replay_simulation()
 
         # 验证回放是否成功记录预警触发
         self.assertTrue(hasattr(monitor, "_replay_triggers"))

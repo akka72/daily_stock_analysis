@@ -413,6 +413,34 @@ class AkshareFundamentalAdapter:
         result["status"] = "partial" if has_content else "not_supported"
         return result
 
+    def _get_tushare_fetcher(self) -> Optional[Any]:
+        """懒加载并缓存 TushareFetcher（仅用于日线资金流备份）。
+
+        开关未开 / 未配置 Token / 构造失败 → 返回 None。
+        `_tushare_fetcher` 用 False 作「已禁用」sentinel，避免每次重复构造。
+        """
+        cached = getattr(self, "_tushare_fetcher", None)
+        if cached is not None:
+            return cached if cached is not False else None
+        try:
+            from src.config import get_config
+
+            if not get_config().fundamental_tushare_moneyflow_enabled:
+                self._tushare_fetcher = False
+                return None
+            from data_provider.tushare_fetcher import TushareFetcher
+
+            ts = TushareFetcher()
+            if not ts.is_available():
+                self._tushare_fetcher = False
+                return None
+            self._tushare_fetcher = ts
+            return ts
+        except Exception as e:
+            logger.debug(f"[fundamental] Tushare 资金流备份不可用: {e}")
+            self._tushare_fetcher = False
+            return None
+
     def get_capital_flow(self, stock_code: str, top_n: int = 5) -> Dict[str, Any]:
         """
         Return stock + sector capital flow.
@@ -445,6 +473,15 @@ class AkshareFundamentalAdapter:
                     "inflow_10d": inflow_10d,
                 }
                 result["source_chain"].append(f"capital_stock:{stock_source}")
+
+        # akshare 东财日线资金流失败 → 回落 Tushare moneyflow（盘后日级备份）
+        if not result["stock_flow"]:
+            ts_fetcher = self._get_tushare_fetcher()
+            if ts_fetcher is not None:
+                mf = ts_fetcher.get_individual_moneyflow(stock_code)
+                if mf:
+                    result["stock_flow"] = mf
+                    result["source_chain"].append("capital_stock:tushare_moneyflow")
 
         sector_df, sector_source, sector_errors = self._call_df_candidates([
             ("stock_sector_fund_flow_rank", {}),

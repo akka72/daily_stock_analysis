@@ -1117,6 +1117,61 @@ class TushareFetcher(BaseFetcher):
     
 
     
+    def get_individual_moneyflow(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        """
+        个股日级资金流向（Tushare moneyflow，盘后更新；非盘中分钟流）。
+
+        作为 akshare 东财日线资金流的**备份源**：当 akshare 拉取失败时由
+        fundamental_adapter 回落调用。一次取最近 ~15 自然日(覆盖 ~10 交易日)，
+        既给当日主力净流入，又累加 5/10 日。
+
+        Returns:
+            {"main_net_inflow": float|None, "inflow_5d": float|None, "inflow_10d": float|None}，
+            单位万元(与东财日线同量级)；未配置 Token / 无 moneyflow 权限 / 拉取失败 → None。
+        """
+        if self._api is None:
+            return None
+        if _is_us_code(stock_code) or _is_hk_market(stock_code):
+            return None  # moneyflow 仅覆盖沪深 A 股
+        try:
+            ts_code = self._convert_stock_code(stock_code)
+        except Exception:
+            return None
+
+        now = self._get_china_now()
+        end = now.strftime("%Y%m%d")
+        start = (now - timedelta(days=15)).strftime("%Y%m%d")
+
+        try:
+            df = self._call_api_with_rate_limit(
+                "moneyflow", ts_code=ts_code, start_date=start, end_date=end
+            )
+        except Exception as e:
+            # 无 moneyflow 权限 / 配额超限 → 优雅返回 None，由调用方继续降级
+            logger.warning(f"[Tushare] moneyflow 调用失败({stock_code}): {e}")
+            return None
+
+        if df is None or df.empty or "net_amount" not in df.columns:
+            return None
+
+        def _f(v) -> Optional[float]:
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                return None
+            # pandas 求和可能得到 nan
+            if f != f:  # noqa: E714  NaN check
+                return None
+            return f
+
+        df = df.sort_values("trade_date", ascending=False)
+        net = pd.to_numeric(df["net_amount"], errors="coerce")
+        return {
+            "main_net_inflow": _f(net.iloc[0]) if len(net) else None,  # net_amount = 主力净流入额(万元)
+            "inflow_5d": _f(net.iloc[:5].sum(skipna=True)),
+            "inflow_10d": _f(net.iloc[:10].sum(skipna=True)),
+        }
+
     def get_chip_distribution(self, stock_code: str) -> Optional[ChipDistribution]:
         """
         获取筹码分布数据

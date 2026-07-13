@@ -50,6 +50,7 @@ from .realtime_types import (
     get_realtime_circuit_breaker, get_chip_circuit_breaker,
     safe_float, safe_int  # 使用统一的类型转换函数
 )
+from .eastmoney_flow import fetch_fflow_klines
 from .us_index_mapping import is_us_index_code, is_us_stock_code
 
 
@@ -958,48 +959,29 @@ class AkshareFetcher(BaseFetcher):
             return quote
 
     def _inject_capital_flow(self, quote: UnifiedRealtimeQuote) -> None:
-        """为 A 股行情对象拉取并注入实时资金流向数据 (自东财接口，避开代理)"""
+        """为 A 股行情对象拉取并注入实时资金流向数据（东财接口，避开代理）。
+
+        拉取逻辑（节流 + 退避重试 + 熔断降级）集中在 `eastmoney_flow.fetch_fflow_klines`，
+        被东财软封禁时会返回 None，此时行情对象保持纯价格盯盘（不报错）。
+        """
         base = quote.code.strip()
         if base.startswith(("6", "5", "90")):
             secid = f"1.{base}"
         else:
             secid = f"0.{base}"
-            
-        url = "http://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
-        params = {
-            "lmt": "0",
-            "klt": "1",
-            "secid": secid,
-            "fields1": "f1,f2,f3,f7",
-            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63",
-            "ut": "b2884a393a59ad64002292a3e90d46a5"
-        }
-        try:
-            # 必须显式禁用代理以防止代理失败
-            response = requests.get(
-                url, 
-                params=params, 
-                proxies={"http": None, "https": None}, 
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                },
-                timeout=5
+
+        klines = fetch_fflow_klines(secid)
+        if not klines:
+            return
+        last_kline = klines[-1]
+        if len(last_kline) >= 6:
+            quote.main_net_inflow = safe_float(last_kline[1])
+            quote.large_net_inflow = safe_float(last_kline[4])
+            quote.super_large_net_inflow = safe_float(last_kline[5])
+            logger.debug(
+                f"[资金流向] 成功注入 {quote.code}: "
+                f"主力净买入={quote.main_net_inflow}, 大单净额={quote.large_net_inflow}"
             )
-            if response.status_code == 200:
-                data = response.json()
-                klines = data.get("data", {}).get("klines", [])
-                if klines:
-                    last_kline = klines[-1].split(",")
-                    if len(last_kline) >= 6:
-                        quote.main_net_inflow = safe_float(last_kline[1])
-                        quote.large_net_inflow = safe_float(last_kline[4])
-                        quote.super_large_net_inflow = safe_float(last_kline[5])
-                        logger.debug(
-                            f"[资金流向] 成功注入 {quote.code}: "
-                            f"主力净买入={quote.main_net_inflow}, 大单净额={quote.large_net_inflow}"
-                        )
-        except Exception as e:
-            logger.warning(f"[资金流向] 请求东财资金流向数据异常 ({quote.code}): {e}")
     
     def _get_stock_realtime_quote_em(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
         """
