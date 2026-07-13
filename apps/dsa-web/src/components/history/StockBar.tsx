@@ -6,6 +6,9 @@ import { StockBarItemComponent } from './StockBarItem';
 import type { StockBarItem as StockBarItemType } from '../../types/analysis';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
+/** 大盘复盘伪项的股票代码（非真实个股，批量分析需排除）。 */
+const MARKET_CODE = 'MARKET';
+
 interface StockBarProps {
   items: StockBarItemType[];
   isLoading: boolean;
@@ -14,6 +17,12 @@ interface StockBarProps {
   onItemClick: (recordId: number) => void;
   onDeleteStock?: (stockCode: string) => Promise<void> | void;
   isDeleting?: boolean;
+  /** 批量分析回调，参数为已过滤 'MARKET' 的有效股票代码。 */
+  onAnalyzeSelected?: (stockCodes: string[]) => void;
+  /** 批量分析进行中（按钮加载/禁用）。 */
+  isAnalyzingBatch?: boolean;
+  /** 最近一次批量分析摘要（渲染于工具栏下）。 */
+  batchSummary?: string | null;
   className?: string;
 }
 
@@ -29,16 +38,21 @@ export const StockBar: React.FC<StockBarProps> = ({
   onItemClick,
   onDeleteStock,
   isDeleting = false,
+  onAnalyzeSelected,
+  isAnalyzingBatch = false,
+  batchSummary = null,
   className = '',
 }) => {
   const { t } = useUiLanguage();
-  const isMarketReview = (code: string) => code === 'MARKET';
+  const isMarketReview = (code: string) => code === MARKET_CODE;
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const selectAllRef = useRef<HTMLInputElement>(null);
   const selectAllId = useId();
 
   const deletableItems = items;
   const selectedCount = [...selectedCodes].filter((code) => deletableItems.some((item) => item.stockCode === code)).length;
+  /** 可批量分析的选中数：排除 'MARKET'（大盘复盘伪项）。与 handleAnalyzeSelected 的过滤口径一致。 */
+  const analyzeableCount = [...selectedCodes].filter((c) => c && c !== MARKET_CODE).length;
   const allVisibleSelected = deletableItems.length > 0 && selectedCount === deletableItems.length;
   const someVisibleSelected = selectedCount > 0 && !allVisibleSelected;
 
@@ -72,6 +86,16 @@ export const StockBar: React.FC<StockBarProps> = ({
     }
     setSelectedCodes(new Set());
   }, [onDeleteStock, selectedCodes]);
+
+  const handleAnalyzeSelected = useCallback(() => {
+    if (!onAnalyzeSelected || selectedCodes.size === 0 || isDeleting || isAnalyzingBatch) return;
+    // 排除 'MARKET'（大盘复盘伪项，非个股）。
+    const codes = [...selectedCodes].filter((c) => c && c !== MARKET_CODE);
+    // 无有效个股：不清空勾选（用户可能仍在调整选择），留待真正提交成功后再清空。
+    if (codes.length === 0) return;
+    onAnalyzeSelected(codes);
+    setSelectedCodes(new Set());
+  }, [onAnalyzeSelected, selectedCodes, isDeleting, isAnalyzingBatch]);
 
   return (
     <aside className={`glass-card overflow-hidden flex flex-col ${className}`}>
@@ -129,6 +153,28 @@ export const StockBar: React.FC<StockBarProps> = ({
               >
                 {isDeleting ? t('common.deleting') : t('common.delete')}
               </Button>
+              {onAnalyzeSelected && (
+                <Button
+                  variant="primary"
+                  size="xsm"
+                  onClick={() => void handleAnalyzeSelected()}
+                  disabled={analyzeableCount === 0 || isDeleting || isAnalyzingBatch}
+                  isLoading={isAnalyzingBatch}
+                  loadingText={t('home.analyzing')}
+                >
+                  {t('common.batchAnalyze')}
+                </Button>
+              )}
+            </div>
+          )}
+
+          {batchSummary && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="px-2 text-[11px] text-muted-text animate-in fade-in duration-200"
+            >
+              {batchSummary}
             </div>
           )}
         </div>

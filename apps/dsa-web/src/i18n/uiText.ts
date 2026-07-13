@@ -1,6 +1,7 @@
 export type UiLanguage = 'zh' | 'en';
 
 const zh = {
+  'common.batchAnalyze': '批量分析',
   'common.cancel': '取消',
   'common.close': '关闭',
   'common.closeDrawer': '关闭抽屉',
@@ -801,6 +802,7 @@ const zh = {
 export type UiTextKey = keyof typeof zh;
 
 const en: Record<UiTextKey, string> = {
+  'common.batchAnalyze': 'Analyze',
   'common.cancel': 'Cancel',
   'common.close': 'Close',
   'common.closeDrawer': 'Close drawer',
