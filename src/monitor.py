@@ -239,6 +239,14 @@ class RealtimeMonitor:
                     "window": self._open_surge_window_minutes(),
                     "_default": True,
                 })
+            if self._sharp_drop_enabled():
+                enriched.append({
+                    "stock_code": code,
+                    "type": "sharp_drop",
+                    "bars": self._sharp_drop_bars(),
+                    "drop_pct": self._sharp_drop_pct(),
+                    "_default": True,
+                })
         return enriched
 
     @staticmethod
@@ -573,6 +581,24 @@ class RealtimeMonitor:
                                 f"开盘冲高至 {_o_high:.2f} 元后回落"
                                 f"（跌幅 {(_o_high - quote.price) / _o_high * 100.0:.2f}%），⚠️ 注意下杀风险"
                             )
+
+                # I. 急跌幅度：近 N 笔价格跌幅超阈（用近期价格窗口，非 change_pct，避免盘中仍涨时漏报）
+                elif r_type == "sharp_drop":
+                    _raw_b = rule.get("bars")
+                    _bars = int(_raw_b) if _raw_b is not None else self._sharp_drop_bars()
+                    _raw_dp = rule.get("drop_pct")
+                    _drop_pct = float(_raw_dp) if _raw_dp is not None else self._sharp_drop_pct()
+                    _hist = self.price_history[code]
+                    if _bars >= 1 and len(_hist) >= _bars and quote.price is not None:
+                        _p0 = _hist[-_bars]
+                        if _p0 > 0:
+                            _drop_observed = (_p0 - quote.price) / _p0 * 100.0
+                            if _drop_observed >= _drop_pct:
+                                triggered = True
+                                rule_desc = (
+                                    f"近 {_bars} 笔跌幅 {_drop_observed:.2f}%"
+                                    f"（{_p0:.2f} → {quote.price:.2f}），⚠️ 急跌"
+                                )
 
                 # 3. 触发预警逻辑
                 if triggered:

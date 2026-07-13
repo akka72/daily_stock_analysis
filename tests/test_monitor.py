@@ -509,6 +509,47 @@ class TestMonitor(unittest.TestCase):
         self.assertFalse(any("开盘冲高" in t for t in monitor._replay_triggers), monitor._replay_triggers)
         self.assertAlmostEqual(monitor.open_high["000725"], 10.00)
 
+    def test_sharp_drop_fires(self):
+        """5 笔内自首笔跌 2%(≥1.5%)→触发急跌，rule_desc 含 '近 5 笔'。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            for i, p in enumerate([10.00, 9.90, 9.85, 9.80, 9.80]):
+                monitor.evaluate_quote(self._q(price=p, volume=100000), is_replay=True, replay_time=f"2026-07-13 10:0{i}")
+        hits = [t for t in monitor._replay_triggers if "急跌" in t]
+        self.assertEqual(len(hits), 1, f"expected sharp-drop trigger, got {monitor._replay_triggers}")
+        self.assertIn("近 5 笔", hits[0])
+
+    def test_sharp_drop_subthreshold_no_fire(self):
+        """5 笔累计跌 1%(<1.5%)→不触发。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            for i, p in enumerate([10.00, 9.98, 9.97, 9.96, 9.90]):
+                monitor.evaluate_quote(self._q(price=p, volume=100000), is_replay=True, replay_time=f"2026-07-13 10:0{i}")
+        self.assertFalse(any("急跌" in t for t in monitor._replay_triggers), monitor._replay_triggers)
+
+    def test_sharp_drop_insufficient_bars_no_fire(self):
+        """仅 3 笔(<5)→不触发。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            monitor.evaluate_quote(self._q(price=10.00, volume=100000), is_replay=True, replay_time="2026-07-13 10:00")
+            monitor.evaluate_quote(self._q(price=9.80, volume=110000), is_replay=True, replay_time="2026-07-13 10:01")
+            monitor.evaluate_quote(self._q(price=9.60, volume=120000), is_replay=True, replay_time="2026-07-13 10:02")
+        self.assertFalse(any("急跌" in t for t in monitor._replay_triggers), monitor._replay_triggers)
+
+    def test_sharp_drop_cooldown(self):
+        """触发后 15 分钟内同码再达阈值→不重复触发(冷却)。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        with patch("src.monitor.NotificationService"):
+            for i, p in enumerate([10.00, 9.90, 9.85, 9.80, 9.80]):
+                monitor.evaluate_quote(self._q(price=p, volume=100000), is_replay=True, replay_time=f"2026-07-13 10:0{i}")
+            monitor.evaluate_quote(self._q(price=9.60, volume=100000), is_replay=True, replay_time="2026-07-13 10:05")
+        hits = [t for t in monitor._replay_triggers if "急跌" in t]
+        self.assertEqual(len(hits), 1, f"cooldown should block 2nd fire, got {monitor._replay_triggers}")
+
 
 class TestMonitorDetectorConfig(unittest.TestCase):
     """开盘冲高回落 + 急跌幅度 检测器的 config 字段解析。"""
