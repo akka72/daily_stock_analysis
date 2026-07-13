@@ -550,6 +550,46 @@ class TestMonitor(unittest.TestCase):
         hits = [t for t in monitor._replay_triggers if "急跌" in t]
         self.assertEqual(len(hits), 1, f"cooldown should block 2nd fire, got {monitor._replay_triggers}")
 
+    def test_run_replay_emits_both_detectors_and_clears_state(self):
+        """run_replay_simulation 应在分钟序列中触发 open_surge_revert + sharp_drop，且事后清掉 price_history。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config(stock_list=["000725"]))
+        monitor._replay_triggers = []
+
+        # 静态行情（run_replay 用其 name/pre_close/circ_mv/source 作为每笔基础信息）
+        static_quote = UnifiedRealtimeQuote(
+            code="000725", name="京东方A", source=RealtimeSource.TENCENT,
+            price=10.0, volume=0, main_net_inflow=0.0, large_net_inflow=0.0,
+            pre_close=10.0, circ_mv=10000000000.0,
+        )
+
+        # 分时趋势字符串: parts[0]=time, parts[2]=price, parts[5]=vol(手)，至少 8 字段
+        # 含冲高回落(09:30 10.00 → 09:35 10.20 → 09:40 10.10) + 急跌(10:00-10:04 共5笔跌至 9.80)
+        trends = [
+            "2026-07-13 09:30,10.0,10.00,0,0,100,0,0",
+            "2026-07-13 09:35,10.1,10.20,0,0,120,0,0",
+            "2026-07-13 09:40,10.1,10.10,0,0,130,0,0",
+            "2026-07-13 10:00,10.0,10.00,0,0,100,0,0",
+            "2026-07-13 10:01,9.95,9.90,0,0,110,0,0",
+            "2026-07-13 10:02,9.9,9.85,0,0,120,0,0",
+            "2026-07-13 10:03,9.85,9.80,0,0,130,0,0",
+            "2026-07-13 10:04,9.85,9.80,0,0,140,0,0",
+        ]
+
+        fake_resp = MagicMock()
+        fake_resp.status_code = 200
+        fake_resp.json.return_value = {"data": {"trends": trends}}
+
+        with patch.object(monitor.fetcher_mgr, "get_realtime_quote", return_value=static_quote), \
+             patch("src.monitor.fetch_fflow_klines", return_value=[["2026-07-13 09:30", "0.0", "0", "0", "0.0", "0.0"]]), \
+             patch("src.monitor.requests.get", return_value=fake_resp):
+            monitor.run_replay_simulation()
+
+        triggers = monitor._replay_triggers
+        self.assertTrue(any("开盘冲高" in t for t in triggers), f"missing open-surge-revert, got {triggers}")
+        self.assertTrue(any("急跌" in t for t in triggers), f"missing sharp-drop, got {triggers}")
+        # 事后清理（G 块）应清掉 price_history，防止污染实时内存
+        self.assertEqual(len(monitor.price_history["000725"]), 0)
+
 
 class TestMonitorDetectorConfig(unittest.TestCase):
     """开盘冲高回落 + 急跌幅度 检测器的 config 字段解析。"""

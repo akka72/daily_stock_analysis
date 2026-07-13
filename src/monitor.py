@@ -795,6 +795,11 @@ class RealtimeMonitor:
             self.consecutive_flow_green.pop(code, None)
             self.price_dir_run.pop(code, None)
             self.flow_sign_run.pop(code, None)
+            self.price_history[code].clear()
+            self.open_price.pop(code, None)
+            self.open_high.pop(code, None)
+            self.open_surge_fired.pop(code, None)
+            self.open_day.pop(code, None)
 
             # F. 开始回放计算
             stock_triggers = 0
@@ -831,6 +836,11 @@ class RealtimeMonitor:
             self.consecutive_flow_green.pop(code, None)
             self.price_dir_run.pop(code, None)
             self.flow_sign_run.pop(code, None)
+            self.price_history[code].clear()
+            self.open_price.pop(code, None)
+            self.open_high.pop(code, None)
+            self.open_surge_fired.pop(code, None)
+            self.open_day.pop(code, None)
 
             logger.info(f"[回放] {name}({code}) 回放测试完成！触发预警次数: {stock_triggers}")
 
