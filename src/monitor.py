@@ -104,6 +104,8 @@ DEFAULT_SURGE_RATIO = 3.0
 # 默认"连续绿柱卖出"判定：连续绿柱根数 / 放量倍数（相对近几分钟成交量均值）
 DEFAULT_GREEN_STREAK_BARS = 2
 DEFAULT_GREEN_STREAK_VOLUME_RATIO = 1.5
+# 默认红绿反转降噪：前序须连续 N 根同向（红或绿）才视为"有效反转"，过滤单笔价格/大单抖动
+DEFAULT_REVERSAL_BARS = 3
 
 
 class RealtimeMonitor:
@@ -161,6 +163,9 @@ class RealtimeMonitor:
         # 连续绿柱（价格下跌 / 大单净流出）连击计数，用于"连续绿柱卖出"规则
         self.consecutive_price_green: Dict[str, int] = {}
         self.consecutive_flow_green: Dict[str, int] = {}
+        # 红绿反转降噪：截至上一笔的"连续同向"计数（价格方向 / 大单符号），过滤单笔抖动
+        self.price_dir_run: Dict[str, int] = {}
+        self.flow_sign_run: Dict[str, int] = {}
         
         # 预警冷却字典：避免短时间频繁发送报警，冷却时间默认 15 分钟
         self.cooldowns: Dict[tuple, float] = {}
@@ -243,10 +248,16 @@ class RealtimeMonitor:
 
     @staticmethod
     def _cooldown_seconds(r_type: str) -> float:
-        """反转类规则按"任意反转都报"不设冷却；放量异动类保留 15 分钟冷却避免刷屏。"""
-        if r_type.endswith("_reversal"):
-            return 0.0
+        """所有规则统一 15 分钟冷却，避免短时间内重复刷屏（含红绿反转类，配合"连续 N 根同向"过滤单笔抖动）。"""
         return 900.0
+
+    def _reversal_bars(self) -> int:
+        """红绿反转降噪所需的前序"连续同向"笔数（过滤单笔抖动）。读 config，最低 1。"""
+        try:
+            val = int(getattr(self.config, "agent_event_monitor_reversal_bars", DEFAULT_REVERSAL_BARS) or DEFAULT_REVERSAL_BARS)
+        except (TypeError, ValueError):
+            val = DEFAULT_REVERSAL_BARS
+        return val if val >= 1 else DEFAULT_REVERSAL_BARS
 
     def run_check_cycle(self):
         """执行单次轮询检测周期"""
@@ -406,23 +417,25 @@ class RealtimeMonitor:
                             f"（大单净额 {(quote.large_net_inflow or 0) / 10000.0:.2f} 万元）"
                         )
 
-                # E. 价格方向反转（红转绿/绿转红）
+                # E. 价格方向反转（红转绿/绿转红）：仅当前序已连续 N 根同向（过滤单笔抖动）时才视为有效反转
                 elif r_type == "price_reversal":
                     cur_dir = self._price_direction(quote.price, last_quote.price)
                     prev_dir = self.prev_price_direction.get(code)
-                    if prev_dir and cur_dir and cur_dir != prev_dir:
+                    _run = self.price_dir_run.get(code, 0)
+                    if prev_dir and cur_dir and cur_dir != prev_dir and _run >= self._reversal_bars():
                         triggered = True
                         _flip = "红转绿" if prev_dir == "红" else "绿转红"
-                        rule_desc = f"价格方向反转 {_flip}（上笔{prev_dir} → 本笔{cur_dir}）"
+                        rule_desc = f"价格方向反转 {_flip}（前 {_run} 笔{prev_dir} → 本笔{cur_dir}）"
 
-                # F. 大单净额反转（红转绿/绿转红）
+                # F. 大单净额反转（红转绿/绿转红）：仅当前序已连续 N 笔同向（过滤单笔抖动）时才视为有效反转
                 elif r_type == "flow_reversal":
                     cur_sign = self._large_net_sign(quote.large_net_inflow)
                     prev_sign = self.prev_large_sign.get(code)
-                    if prev_sign and cur_sign and cur_sign != prev_sign:
+                    _run = self.flow_sign_run.get(code, 0)
+                    if prev_sign and cur_sign and cur_sign != prev_sign and _run >= self._reversal_bars():
                         triggered = True
                         _flip = "红转绿" if prev_sign == "红" else "绿转红"
-                        rule_desc = f"大单净额反转 {_flip}（上笔{prev_sign} → 本笔{cur_sign}）"
+                        rule_desc = f"大单净额反转 {_flip}（前 {_run} 笔{prev_sign} → 本笔{cur_sign}）"
 
                 # G. 连续绿柱卖出（连续放量下跌 / 大单净流出；维度 mode=price/flow/both）
                 elif r_type == "green_streak_sell":
@@ -479,13 +492,23 @@ class RealtimeMonitor:
                                 daemon=True
                             ).start()
 
-        # 更新方向/符号状态，供下一笔反转判定（仅在存在前序行情时）
+        # 更新方向/符号状态及"连续同向"计数，供下一笔反转判定（仅在存在前序行情时）
         if last_quote:
             _cur_dir = self._price_direction(quote.price, last_quote.price)
             if _cur_dir:
+                _prev_dir = self.prev_price_direction.get(code)
+                if _prev_dir and _cur_dir == _prev_dir:
+                    self.price_dir_run[code] = self.price_dir_run.get(code, 1) + 1
+                else:
+                    self.price_dir_run[code] = 1
                 self.prev_price_direction[code] = _cur_dir
             _cur_sign = self._large_net_sign(quote.large_net_inflow)
             if _cur_sign:
+                _prev_sign = self.prev_large_sign.get(code)
+                if _prev_sign and _cur_sign == _prev_sign:
+                    self.flow_sign_run[code] = self.flow_sign_run.get(code, 1) + 1
+                else:
+                    self.flow_sign_run[code] = 1
                 self.prev_large_sign[code] = _cur_sign
 
         self.last_quotes[code] = quote
@@ -647,6 +670,8 @@ class RealtimeMonitor:
             self.prev_large_sign.pop(code, None)
             self.consecutive_price_green.pop(code, None)
             self.consecutive_flow_green.pop(code, None)
+            self.price_dir_run.pop(code, None)
+            self.flow_sign_run.pop(code, None)
 
             # F. 开始回放计算
             stock_triggers = 0
@@ -681,6 +706,8 @@ class RealtimeMonitor:
             self.prev_large_sign.pop(code, None)
             self.consecutive_price_green.pop(code, None)
             self.consecutive_flow_green.pop(code, None)
+            self.price_dir_run.pop(code, None)
+            self.flow_sign_run.pop(code, None)
 
             logger.info(f"[回放] {name}({code}) 回放测试完成！触发预警次数: {stock_triggers}")
 

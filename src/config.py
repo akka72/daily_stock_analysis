@@ -870,6 +870,7 @@ class Config:
     agent_event_monitor_default_rules_enabled: bool = True  # 未配置显式规则的自选股自动套用默认盘中异动规则(放量/大单异动/红绿反转)
     agent_event_monitor_replay_debug: bool = False  # 回放时打印东财原始数据(分时/资金流向/逐笔明细)用于排查
     agent_event_monitor_green_streak_mode: str = "both"  # 连续绿柱卖出判定维度: price(仅价格下跌)/flow(仅大单净流出)/both(双重绿)
+    agent_event_monitor_reversal_bars: int = 3  # 红绿反转降噪: 前序须连续 N 根同向(红或绿)才视为有效反转，过滤单笔抖动(最低1)
 
     # === 通知配置（可同时配置多个，全部推送）===
     
@@ -1827,6 +1828,12 @@ class Config:
             agent_event_monitor_default_rules_enabled=os.getenv('AGENT_EVENT_MONITOR_DEFAULT_RULES_ENABLED', 'true').lower() == 'true',
             agent_event_monitor_replay_debug=os.getenv('AGENT_EVENT_MONITOR_REPLAY_DEBUG', 'false').lower() == 'true',
             agent_event_monitor_green_streak_mode=os.getenv('AGENT_EVENT_MONITOR_GREEN_STREAK_MODE', 'both'),
+            agent_event_monitor_reversal_bars=parse_env_int(
+                os.getenv('AGENT_EVENT_MONITOR_REVERSAL_BARS'),
+                3,
+                field_name='AGENT_EVENT_MONITOR_REVERSAL_BARS',
+                minimum=1,
+            ),
             wechat_webhook_url=os.getenv('WECHAT_WEBHOOK_URL'),
             feishu_webhook_url=os.getenv('FEISHU_WEBHOOK_URL'),
             feishu_webhook_secret=os.getenv('FEISHU_WEBHOOK_SECRET'),

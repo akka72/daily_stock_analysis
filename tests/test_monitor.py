@@ -165,6 +165,7 @@ class TestMonitor(unittest.TestCase):
         config.agent_event_alert_rules_json = rules_json
         config.agent_event_monitor_default_rules_enabled = defaults_enabled
         config.agent_event_monitor_green_streak_mode = green_streak_mode
+        config.agent_event_monitor_reversal_bars = 3
         config.agent_mode = False
         return config
 
@@ -216,34 +217,60 @@ class TestMonitor(unittest.TestCase):
         )
 
     def test_price_reversal_fires(self):
-        """价格方向由涨转跌，应在第二笔触发价格反转预警。"""
+        """价格连续3根红后转绿，应触发价格反转（前序连续同向达 N 根才算有效反转）。"""
         monitor = RealtimeMonitor(self._make_default_rules_config())
         monitor._replay_triggers = []
         monitor.last_quotes["000725"] = self._q(price=10.0, volume=100000)
         with patch("src.monitor.NotificationService"):
-            # 第一笔：上涨（红），建立方向
+            # 前3笔连续上涨（红）：累积"连续同向"计数（默认需 >= 3）
             monitor.evaluate_quote(self._q(price=10.5, volume=110000), is_replay=True, replay_time="2026-07-10 10:00")
-            # 第二笔：下跌（绿），方向反转
-            monitor.evaluate_quote(self._q(price=10.2, volume=120000), is_replay=True, replay_time="2026-07-10 10:01")
+            monitor.evaluate_quote(self._q(price=10.8, volume=110000), is_replay=True, replay_time="2026-07-10 10:01")
+            monitor.evaluate_quote(self._q(price=11.0, volume=110000), is_replay=True, replay_time="2026-07-10 10:02")
+            # 第4笔下跌（绿）：前序连续3根红 → 触发红转绿
+            monitor.evaluate_quote(self._q(price=10.6, volume=120000), is_replay=True, replay_time="2026-07-10 10:03")
         self.assertTrue(
             any("价格方向反转" in t and "红转绿" in t for t in monitor._replay_triggers),
             f"expected price reversal trigger, got {monitor._replay_triggers}",
         )
 
     def test_flow_reversal_fires(self):
-        """大单净额由净流入转净流出，应在第二笔触发大单反转预警。"""
+        """大单净额连续3笔净流入后转净流出，应触发大单反转（前序连续同向达 N 笔才算有效反转）。"""
         monitor = RealtimeMonitor(self._make_default_rules_config())
         monitor._replay_triggers = []
         monitor.last_quotes["000725"] = self._q(price=10.0, volume=100000, large_net_inflow=0.0)
         with patch("src.monitor.NotificationService"):
-            # 第一笔：大单净流入（红），建立符号
+            # 前3笔大单净流入（红）：累积"连续同向"计数
             monitor.evaluate_quote(self._q(price=10.0, volume=110000, large_net_inflow=500000.0), is_replay=True, replay_time="2026-07-10 10:00")
-            # 第二笔：大单净流出（绿），符号反转
-            monitor.evaluate_quote(self._q(price=10.0, volume=120000, large_net_inflow=-300000.0), is_replay=True, replay_time="2026-07-10 10:01")
+            monitor.evaluate_quote(self._q(price=10.0, volume=110000, large_net_inflow=600000.0), is_replay=True, replay_time="2026-07-10 10:01")
+            monitor.evaluate_quote(self._q(price=10.0, volume=110000, large_net_inflow=700000.0), is_replay=True, replay_time="2026-07-10 10:02")
+            # 第4笔大单净流出（绿）：前序连续3笔净流入 → 触发红转绿
+            monitor.evaluate_quote(self._q(price=10.0, volume=120000, large_net_inflow=-300000.0), is_replay=True, replay_time="2026-07-10 10:03")
         self.assertTrue(
             any("大单净额反转" in t and "红转绿" in t for t in monitor._replay_triggers),
             f"expected flow reversal trigger, got {monitor._replay_triggers}",
         )
+
+    def test_reversal_filtered_when_streak_too_short(self):
+        """前序仅连续2根红（< 默认 N=3）就转绿，不应触发反转（过滤单笔/短促抖动）。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor._replay_triggers = []
+        monitor.last_quotes["000725"] = self._q(price=10.0, volume=100000)
+        with patch("src.monitor.NotificationService"):
+            # 仅2根红
+            monitor.evaluate_quote(self._q(price=10.5, volume=110000), is_replay=True, replay_time="2026-07-10 10:00")
+            monitor.evaluate_quote(self._q(price=10.8, volume=110000), is_replay=True, replay_time="2026-07-10 10:01")
+            # 转绿（前序 run=2 < 3 → 不触发）
+            monitor.evaluate_quote(self._q(price=10.4, volume=120000), is_replay=True, replay_time="2026-07-10 10:02")
+        self.assertFalse(
+            any("价格方向反转" in t for t in monitor._replay_triggers),
+            f"short streak should be filtered as jitter, got {monitor._replay_triggers}",
+        )
+
+    def test_reversal_rules_have_cooldown(self):
+        """反转类规则同样适用 15 分钟冷却（降噪），不再是 0 冷却。"""
+        self.assertEqual(RealtimeMonitor._cooldown_seconds("price_reversal"), 900.0)
+        self.assertEqual(RealtimeMonitor._cooldown_seconds("flow_reversal"), 900.0)
+        self.assertEqual(RealtimeMonitor._cooldown_seconds("volume_spike_ratio"), 900.0)
 
     def test_explicit_rules_suppress_defaults(self):
         """已显式配置规则的股票不再注入默认异动规则（保持用户完全控制）。"""
