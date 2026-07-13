@@ -965,13 +965,17 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
           .filter((c) => c && c !== 'MARKET'),
       ),
     );
+    // 客户端拒绝：清空旧的批量摘要，避免旧成功提示与新 inputError 并存。
     if (codes.length === 0) {
-      set({ inputError: '请选择有效的股票（不含大盘复盘）' });
+      set({ inputError: '请选择有效的股票（不含大盘复盘）', batchSummary: null });
       return;
     }
     const MAX_BATCH = 50;
     if (codes.length > MAX_BATCH) {
-      set({ inputError: `一次最多批量分析 ${MAX_BATCH} 只，当前选中 ${codes.length} 只` });
+      set({
+        inputError: `一次最多批量分析 ${MAX_BATCH} 只，当前选中 ${codes.length} 只`,
+        batchSummary: null,
+      });
       return;
     }
     const seq = ++batchRequestSeq;
