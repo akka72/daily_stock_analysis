@@ -550,6 +550,18 @@ class TestMonitor(unittest.TestCase):
         hits = [t for t in monitor._replay_triggers if "急跌" in t]
         self.assertEqual(len(hits), 1, f"cooldown should block 2nd fire, got {monitor._replay_triggers}")
 
+    def test_sharp_drop_bars_clamped_to_window_maxlen(self):
+        """sharp_drop_bars 上限对齐 price_history 窗口(60)：超限裁剪避免静默漏报；下限<1 回落默认 5。"""
+        monitor = RealtimeMonitor(self._make_default_rules_config())
+        monitor.config.agent_event_monitor_sharp_drop_bars = 100
+        self.assertEqual(monitor._sharp_drop_bars(), 60)
+        # 正常值不裁剪
+        monitor.config.agent_event_monitor_sharp_drop_bars = 5
+        self.assertEqual(monitor._sharp_drop_bars(), 5)
+        # 下限保护：<1 回落默认 5
+        monitor.config.agent_event_monitor_sharp_drop_bars = 0
+        self.assertEqual(monitor._sharp_drop_bars(), 5)
+
     def test_run_replay_emits_both_detectors_and_clears_state(self):
         """run_replay_simulation 应在分钟序列中触发 open_surge_revert + sharp_drop，且事后清掉 price_history。"""
         monitor = RealtimeMonitor(self._make_default_rules_config(stock_list=["000725"]))

@@ -315,12 +315,14 @@ class RealtimeMonitor:
         return bool(getattr(self.config, "agent_event_monitor_sharp_drop_enabled", True))
 
     def _sharp_drop_bars(self) -> int:
-        """急跌回看笔数，最低 1。"""
+        """急跌回看笔数，最低 1，上限 60（对齐 price_history deque maxlen，超限会静默漏报）。"""
         try:
             val = int(getattr(self.config, "agent_event_monitor_sharp_drop_bars", 5) or 5)
         except (TypeError, ValueError):
             val = 5
-        return val if val >= 1 else 5
+        if val < 1:
+            val = 5
+        return min(val, 60)  # 对齐 price_history 窗口上限(60)，避免 bars>60 时 len(_hist)>=bars 永不成立→静默漏报
 
     def _sharp_drop_pct(self) -> float:
         """急跌判定：窗口跌幅 %。"""
