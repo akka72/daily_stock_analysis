@@ -349,8 +349,8 @@ class RealtimeMonitor:
                 continue
 
             try:
-                # 2. 拉取实时行情
-                quote = self.fetcher_mgr.get_realtime_quote(code, source="tencent")
+                # 2. 拉取实时行情（DataFetcherManager 按 REALTIME_SOURCE_PRIORITY 自动故障切换，含 tencent 兜底）
+                quote = self.fetcher_mgr.get_realtime_quote(code)
                 if not quote or quote.price is None:
                     continue
 

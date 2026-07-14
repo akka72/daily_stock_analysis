@@ -8,7 +8,7 @@ import os
 import sys
 import time
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, create_autospec
 
 sys.path.append("f:/codeRepo/ai/agent/daily_stock_analysis")
 
@@ -98,6 +98,31 @@ class TestMonitor(unittest.TestCase):
             monitor.run_check_cycle()
             # 验证至少触发了通知发送
             self.assertTrue(mock_send.called)
+
+    def test_run_check_cycle_enforces_get_realtime_quote_signature(self):
+        """回归防护：run_check_cycle 不得向 get_realtime_quote 传 DataFetcherManager 不接受的 kwargs。
+
+        历史 bug：run_check_cycle 误传 source="tencent"，而 DataFetcherManager.get_realtime_quote 签名为
+        (stock_code, *, log_final_failure) 不接受 source，真实运行直接 TypeError。无 spec 的 MagicMock 会
+        静默吞掉任意 kwarg，故用 create_autospec 套真实绑定方法签名约束——若 monitor.py 再传非法 kwarg，
+        调用即抛 TypeError，本测试失败。
+        """
+        config = self._make_default_rules_config(stock_list=["000725"])
+        monitor = RealtimeMonitor(config)
+        quote = self._q(price=10.0)
+
+        # 用真实绑定方法签名约束 mock：传 source= 等非法 kwarg 会立即 TypeError
+        spec_quote = create_autospec(monitor.fetcher_mgr.get_realtime_quote)
+        spec_quote.return_value = quote
+        monitor.fetcher_mgr.get_realtime_quote = spec_quote
+
+        with patch("src.monitor.NotificationService"), \
+             patch("src.monitor.is_within_trading_hours", return_value=True):
+            monitor.run_check_cycle()  # 若误传 source=，此处抛 TypeError → 测试失败
+
+        # 确认确实调用了 get_realtime_quote（未被开市守卫跳过），且 quote 进入评估
+        spec_quote.assert_called_once()
+        self.assertIn("000725", monitor.last_quotes)
 
     def test_run_replay_simulation(self):
         # 1. 模拟行情
